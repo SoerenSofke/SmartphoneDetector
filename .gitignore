@@ -1,0 +1,7 @@
+# Scala-CLI specific directories
+/bin/
+
+# Compiled files
+*.bin
+*.elf
+*.map
