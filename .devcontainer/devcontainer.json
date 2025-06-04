@@ -1,0 +1,6 @@
+{
+    "name": "Arduino-CLI Development",
+    "image": "mcr.microsoft.com/devcontainers/universal:latest",
+    "postCreateCommand": "curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh && export PATH=\"/workspaces/SmartphoneDetector/bin:$PATH\" && source ~/.bashrc",
+    "postAttachCommand": "arduino-cli version"
+}
