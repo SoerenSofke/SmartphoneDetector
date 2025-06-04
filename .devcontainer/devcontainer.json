@@ -1,7 +1,7 @@
 {
     "name": "Arduino-CLI Development",
     "image": "mcr.microsoft.com/devcontainers/universal:latest",
-    "postCreateCommand": "arduino-cli-up.sh",
+    "postCreateCommand": "bash arduino-cli-up.sh",
     "remoteEnv": {
     "PATH": "${containerEnv:PATH}:/workspaces/SmartphoneDetector/bin"
     },
