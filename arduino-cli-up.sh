@@ -15,5 +15,7 @@ arduino-cli core update-index --additional-urls https://espressif.github.io/ardu
 # ESP32 Core installieren
 arduino-cli core install esp32:esp32
 
-# NeoPixel Bibliothek installieren
+# Bibliotheken installieren
 arduino-cli lib install "Adafruit NeoPixel"
+arduino-cli lib install "NimBLE-Arduino"
+arduino-cli lib install "ESP32-BLE-Gamepad"
