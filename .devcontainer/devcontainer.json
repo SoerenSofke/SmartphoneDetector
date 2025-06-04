@@ -1,7 +1,7 @@
 {
     "name": "Arduino-CLI Development",
     "image": "mcr.microsoft.com/devcontainers/universal:latest",
-    "postCreateCommand": "curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh",
+    "postCreateCommand": "curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh && mkdir -p /home/codespace/.arduino15 && ln -s /workspaces/SmartphoneDetector/arduino-cli.yaml /home/codespace/.arduino15/arduino-cli.yaml",
     "remoteEnv": {
     "PATH": "${containerEnv:PATH}:/workspaces/SmartphoneDetector/bin"
     },
