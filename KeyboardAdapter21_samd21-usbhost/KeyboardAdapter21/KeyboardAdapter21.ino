@@ -1,23 +1,36 @@
 #include <Adafruit_NeoPixel.h>
+#include <KeyboardController.h>
 
-// create a pixel strand with 1 pixel on PIN_NEOPIXEL
+
 Adafruit_NeoPixel pixels(1, PIN_NEOPIXEL);
+USBHost usb;
 
-void setup() {
-    pixels.begin();  // initialize the pixel
+KeyboardController keyboard(usb);
+
+void setup(){  
+  pixels.begin();
 }
 
-void loop() {
-    // set the first pixel #0 to red
-    pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-    // and write the data
+void keyPressed(){    
+    pixels.setPixelColor(0, pixels.Color(255, 0, 0));    
     pixels.show();
   
-    delay(1000);
+    delay(10);
     
-    // turn off the pixel
     pixels.clear();
     pixels.show();
+}
+
+void keyReleased() {
+    pixels.setPixelColor(0, pixels.Color(0, 255, 0));
+    pixels.show();
   
-    delay(1000);
+    delay(10);
+    
+    pixels.clear();
+    pixels.show();
+}
+
+void loop(){
+  usb.Task();
 }
