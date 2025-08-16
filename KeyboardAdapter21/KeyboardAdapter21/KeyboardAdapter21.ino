@@ -17,8 +17,14 @@
 #include "USBHIDKeyboard.h" // Keybo
 USBHIDKeyboard Keyboard;
 
+int led = 13;
+
 static void onKeyboarDetect( uint8_t usbNum, void * dev )
 {
+
+  digitalWrite(led, !digitalRead(led));
+
+  /*
   sDevDesc *device = (sDevDesc*)dev;
   printf("New device detected on USB#%d\n", usbNum);
   printf("desc.bcdUSB             = 0x%04x\n", device->bcdUSB);
@@ -44,11 +50,17 @@ static void onKeyboarDetect( uint8_t usbNum, void * dev )
     Keyboard.begin();
     USB.begin();
   }
+
+  */
 }
 
 
 static void onKeyboardData(uint8_t usbNum, uint8_t byte_depth, uint8_t* data, uint8_t data_len)
 {
+
+  digitalWrite(led, !digitalRead(led));
+
+  /*
   // if( myListenUSBPort != usbNum ) return;
   printf("in: ");
   for(int k=0;k<data_len;k++) {
@@ -59,6 +71,7 @@ static void onKeyboardData(uint8_t usbNum, uint8_t byte_depth, uint8_t* data, ui
   // implement keylogger here, before forwarding
 
   Keyboard.sendReport( (KeyReport*)data );
+  */
 }
 
 usb_pins_config_t USB_Pins_Config =
@@ -72,6 +85,16 @@ usb_pins_config_t USB_Pins_Config =
 
 void setup()
 {
+
+  pinMode(led, OUTPUT);
+
+  digitalWrite(led, HIGH);   // turn the LED on (HIGH is the voltage level)
+  delay(500);                // wait for a half second
+  digitalWrite(led, LOW);    // turn the LED off by making the voltage LOW
+  delay(500);                // wait for a half second
+  digitalWrite(led, HIGH);   // turn the LED on (HIGH is the voltage level)
+
+
   Serial.begin(115200);
   delay(5000);
   printf("ESP32-S3 Keylogger\n" );
@@ -85,6 +108,7 @@ void setup()
   USH.setOnEPDescCb( Default_USB_EPDescCb );
 
   USH.init( USB_Pins_Config, onKeyboarDetect, onKeyboardData );
+  digitalWrite(led, LOW);    // turn the LED off by making the voltage LOW
 }
 
 void loop()
