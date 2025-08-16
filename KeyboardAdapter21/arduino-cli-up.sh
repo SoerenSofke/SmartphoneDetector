@@ -7,7 +7,7 @@ curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.
 arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 
 # ESP32 Core installieren
-arduino-cli core install arduino:esp32@2.0.18-arduino.5
+arduino-cli core install esp32:esp32@2.0.17
 
 
 # Bibliotheken installieren
