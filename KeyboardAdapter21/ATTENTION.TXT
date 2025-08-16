@@ -1,0 +1,1 @@
+This solution works with 'simple' keyboards or numpads. However, does not work with 2.4G and mC driven Keyboards / keypads
