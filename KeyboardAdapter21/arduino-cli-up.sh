@@ -16,4 +16,10 @@ arduino-cli lib install "Adafruit NeoPixel"
 
 # Further tools needed
 pip3 install pyserial
+pip3 install esptool
+
+
+#[nix-shell:/dev]$ esptool.py --chip esp32s2 --port /dev/ttyACM0 write_flash 0x0 /home/sofke/Downloads/KeyboardAdapter21.merged.bin 
+
+
 
