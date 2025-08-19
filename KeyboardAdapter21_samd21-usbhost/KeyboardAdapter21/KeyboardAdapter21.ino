@@ -1,6 +1,9 @@
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+#pragma message("__cplusplus: " TOSTRING(__cplusplus))
+
 #include <Adafruit_NeoPixel.h>
 #include <KeyboardController.h>
-
 
 Adafruit_NeoPixel pixels(1, PIN_NEOPIXEL);
 USBHost usb;
