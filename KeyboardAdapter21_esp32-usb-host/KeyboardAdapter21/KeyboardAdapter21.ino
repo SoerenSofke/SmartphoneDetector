@@ -2,28 +2,42 @@
 #define TOSTRING(x) STRINGIFY(x)
 #pragma message("__cplusplus: " TOSTRING(__cplusplus))
 
-#include "EspUsbHost.h"
+#include "EspUsbHostKeybord.h"
+#include <ranges>
 
-class MyEspUsbHost : public EspUsbHost {
-  void onKeyboardKey(uint8_t ascii, uint8_t keycode, uint8_t modifier) {
-    if (' ' <= ascii && ascii <= '~') {
-      Serial.printf("%c", ascii);
-    } else if (ascii == '\r') {
-      Serial.println();
-    }
+class MyEspUsbHostKeybord : public EspUsbHostKeybord
+{
+public:
+  void onKey(usb_transfer_t *transfer)
+  {
+    uint8_t *const p = transfer->data_buffer;
+    Serial.printf("onKey %02x %02x %02x %02x %02x %02x %02x %02x\n", p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
   };
 };
 
-MyEspUsbHost usbHost;
+MyEspUsbHostKeybord usbHost;
 
-void setup() {
+using namespace std::views;
+
+void setup()
+{
   Serial.begin(115200);
-  delay(500);
-
   usbHost.begin();
-  //usbHost.setHIDLocal(HID_LOCAL_Japan_Katakana);
 }
 
-void loop() {
+void loop()
+{
   usbHost.task();
+
+  auto squares = iota(0) |
+                 transform([](int x)
+                           { return x * x; }) |
+                 take(10);
+
+  for (int val : squares)
+  {
+    Serial.print(val);
+    Serial.print(" ");
+  }
+  Serial.println(); // Neue Zeile am Ende
 }
