@@ -10,12 +10,11 @@
 
 // Helper function to write OPL3 register
 void write_register(opl3_chip *chip, uint16_t reg, uint8_t value) {
-    OPL3_WriteReg(chip, reg, value);
+    OPL3_WriteRegBuffered(chip, reg, value);
 }
 
 int main(void) {
     opl3_chip chip;
-    //int16_t buffer[2];  // Stereo output: left and right
     int16_t *stream_buffer = malloc(NUM_SAMPLES * 2 * sizeof(int16_t));
 
     FILE *output;
@@ -77,16 +76,9 @@ int main(void) {
         return 1;
     }
     
-    // Generate audio samples
+    // Generate audio samples & write to file
     OPL3_GenerateStream(&chip, stream_buffer, NUM_SAMPLES);
     fwrite(stream_buffer, sizeof(int16_t), NUM_SAMPLES * 2, output);
-
-    /*
-    for (int i = 0; i < NUM_SAMPLES; i++) {
-        OPL3_Generate(&chip, buffer);
-        fwrite(buffer, sizeof(int16_t), 2, output);
-    }
-    */
     
     free(stream_buffer);
     fclose(output);
