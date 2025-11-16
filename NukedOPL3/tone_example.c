@@ -13,18 +13,40 @@ void write_register(opl3_chip *chip, uint16_t reg, uint8_t value) {
     OPL3_WriteRegBuffered(chip, reg, value);
 }
 
-int main(void) {
-    opl3_chip chip;
-    int16_t *stream_buffer = malloc(NUM_SAMPLES * 2 * sizeof(int16_t));
+void begin(opl3_chip *chip, uint32_t sample_rate) {
+    // 1. Chip initialisieren (setzt ALLE Register auf 0x00)
+    OPL3_Reset(chip, sample_rate);
+    
+    // 2. OPL3-Modus aktivieren
+    OPL3_WriteReg(chip, 0x105, 0x01);
 
+    // 3. Percussion-Modus aktivieren (Register 0xBD, Bit 5)
+    struct BD {
+        uint8_t DAM : 1;
+        uint8_t DVB : 1;
+        uint8_t RYT : 1;
+        uint8_t BD : 1;
+        uint8_t SD : 1;
+        uint8_t TOM : 1;
+        uint8_t TC : 1;
+        uint8_t HH : 1;
+    };
+
+    struct BD bd = {.DAM = 0, .DVB = 0, .RYT = 1, .BD = 0, .SD = 0, .TOM = 0, .TC = 0, .HH = 0};
+    OPL3_WriteReg(chip, 0xBD, *(uint8_t*)&bd);
+}
+
+int main(void) {
+    int16_t *stream_buffer = malloc(NUM_SAMPLES * 2 * sizeof(int16_t));
     FILE *output;
-    
-    // Initialize the chip
-    OPL3_Reset(&chip, SAMPLE_RATE);
-    
-    // Enable OPL3 mode
-    write_register(&chip, 0x105, 0x01);
-    
+
+    opl3_chip chip;
+
+    begin(&chip, SAMPLE_RATE);
+
+    /*
+    // -------- Sine Wave ------------
+        
     // Configure channel 0, operator 1 (modulator)
     // Register 0x20: Tremolo=0, Vibrato=0, Sustain=1, KSR=0, Mult=1
     write_register(&chip, 0x20, 0x21);
@@ -40,6 +62,8 @@ int main(void) {
     
     // Register 0xE0: Waveform=0 (sine wave)
     write_register(&chip, 0xE0, 0x00);
+
+
     
     // Configure channel 0, operator 2 (carrier)
     // Register 0x23: Tremolo=0, Vibrato=0, Sustain=1, KSR=0, Mult=1
@@ -56,6 +80,7 @@ int main(void) {
     
     // Register 0xE3: Waveform=0 (sine wave)
     write_register(&chip, 0xE3, 0x00);
+
     
     // Configure channel 0 connection
     // Register 0xC0: Right=1, Left=1, Feedback=0, FM synthesis
@@ -68,6 +93,35 @@ int main(void) {
     
     // Register 0xB0: Key-On=1, Block=4, F-number high 2 bits=1
     write_register(&chip, 0xB0, 0x31);  // Turn note ON
+    */
+    
+
+    // --- Snare Drum ---- 
+
+    
+    
+    // === Operator 16 (Snare) - mit längerem Sustain ===
+    write_register(&chip, 0x34, 0x0E);   // MULT=14
+    write_register(&chip, 0x54, 0x00);   // TL=0 (Maximum Lautstärke!)
+    
+    // KRITISCH: Attack + Decay + Sustain + Release müssen zusammenpassen!
+    write_register(&chip, 0x74, 0xF6);   // AR=15 (instant), DR=0 (kurz)
+    write_register(&chip, 0x94, 0xFF);   // SL=0 (stays at max), RR=15 (kurz nach Key-Off)
+    
+    write_register(&chip, 0xF4, 0x00);   // Waveform 2
+    
+    // === Kanal 7 ===
+    write_register(&chip, 0xA7, 0x80);
+    write_register(&chip, 0xB7, 0x15);
+    write_register(&chip, 0xC7, 0x33);   // Stereo + Feedback
+    
+    // === JETZT: Snare KEY-ON ===
+    write_register(&chip, 0xBD, 0x28);   // Snare AN!
+
+    // --- start generation ---
+
+
+
     
     // Open output file
     output = fopen("tone_example.raw", "wb");
