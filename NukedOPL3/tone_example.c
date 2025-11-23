@@ -37,7 +37,8 @@ void begin(opl3_chip *chip, uint32_t sample_rate) {
 }
 
 int main(void) {
-    int16_t *stream_buffer = malloc(NUM_SAMPLES * 2 * sizeof(int16_t));
+    int16_t *stream_buffer = (int16_t*) malloc(NUM_SAMPLES * 2 * sizeof(int16_t));
+
     FILE *output;
 
     opl3_chip chip;
