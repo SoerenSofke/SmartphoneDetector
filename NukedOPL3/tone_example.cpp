@@ -28,6 +28,14 @@ enum class Operator {
 };
 
 std::function<void(Operator, uint8_t)> createChipOpl3() {
+    enum class Register {
+        AM_VIB_EGT_MRS_MULT,
+        KSL_TL,
+        AR_DR,
+        SL_RR,
+        WS
+    };
+
     struct OperatorState {
         uint8_t amplitudeModulation = 0;
         uint8_t vibrato = 0;
@@ -42,118 +50,115 @@ std::function<void(Operator, uint8_t)> createChipOpl3() {
         uint8_t releaseRate = 0;
         uint8_t waveformSelect = 0;
     };
-    OperatorState state;
+    OperatorState state[36];
 
-    auto write_am_vib_egt_ksr_mult = [](const OperatorState& state) {
-        uint8_t register_value = 0;
-
-        register_value |= (state.amplitudeModulation & 0x01) << 7;
-        register_value |= (state.vibrato & 0x01) << 6;
-        register_value |= (state.envelopGeneratorType & 0x01) << 5;
-        register_value |= (state.keyScalingRate & 0x01) << 4;
-        register_value |= (state.multiplicationFactor & 0x0F) << 0;    
-    };
-
-    auto write_ksl_tl = [](const OperatorState& state) {
+    auto writeRegister = [](const Register reg, const OperatorState& state) {
         uint8_t register_value = 0;
         
-        register_value |= (state.keyScaleLevel & 0x03) << 6;
-        register_value |= (state.totalLevel & 0x3F) << 0;
-    };
+        switch (reg) {
+            case Register::AM_VIB_EGT_MRS_MULT:
+                register_value |= (state.amplitudeModulation & 0x01) << 7;
+                register_value |= (state.vibrato & 0x01) << 6;
+                register_value |= (state.envelopGeneratorType & 0x01) << 5;
+                register_value |= (state.keyScalingRate & 0x01) << 4;
+                register_value |= (state.multiplicationFactor & 0x0F) << 0;
+                break;
 
-    auto write_ar_dr = [](const OperatorState& state) {
-        uint8_t register_value = 0;
-        
-        register_value |= (state.attackRate & 0x0F) << 4;
-        register_value |= (state.decayRate & 0x0F) << 0;
-    };
+            case Register::KSL_TL:
+                register_value |= (state.keyScaleLevel & 0x03) << 6;
+                register_value |= (state.totalLevel & 0x3F) << 0;
+                break;
 
-    auto write_sl_rr = [](const OperatorState& state) {
-        uint8_t register_value = 0;
-        
-        register_value |= (state.sustainLevel & 0x0F) << 4;
-        register_value |= (state.releaseRate & 0x0F) << 0;
-    };
+            case Register::AR_DR:
+                register_value |= (state.attackRate & 0x0F) << 4;
+                register_value |= (state.decayRate & 0x0F) << 0;
+                break;
 
-    auto write_ws = [](const OperatorState& state) {
-        uint8_t register_value = 0;
-        
-        register_value |= (state.waveformSelect & 0x07) << 0;
-    };    
+            case Register::SL_RR:
+                register_value |= (state.sustainLevel & 0x0F) << 4;
+                register_value |= (state.releaseRate & 0x0F) << 0;
+                break;
+
+            case Register::WS:
+                register_value |= (state.waveformSelect & 0x07) << 0;
+                break;
+        }
+    };
     
-    return [state, write_am_vib_egt_ksr_mult, write_ksl_tl, write_ar_dr, write_sl_rr, write_ws]
+    return [state, writeRegister]
         (Operator op, uint8_t value) mutable {
-            
+
         switch (op) {
             case Operator::AMPLITUDE_MODULATION:
-                state.amplitudeModulation = 
+                state[0].amplitudeModulation = 
                     std::clamp<uint8_t>(value, 0, 1);
-                write_am_vib_egt_ksr_mult(state);
+                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
                 break;
 
             case Operator::VIBRATO:
-                state.vibrato = 
+                state[0].vibrato = 
                     std::clamp<uint8_t>(value, 0, 1);
-                write_am_vib_egt_ksr_mult(state);
+                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
                 break;
 
             case Operator::ENVELOP_GENERATOR_TYPE:
-                state.envelopGeneratorType =
+                state[0].envelopGeneratorType =
                     std::clamp<uint8_t>(value, 0, 1);
-                write_am_vib_egt_ksr_mult(state);
+                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
                 break;                
 
             case Operator::KEY_SCALING_RATE:
-                state.keyScalingRate =
+                state[0].keyScalingRate =
                     std::clamp<uint8_t>(value, 0, 1);
-                write_am_vib_egt_ksr_mult(state);                
+                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
                 break;
 
             case Operator::MULTIPLICATION_FACTOR:
-                state.multiplicationFactor =
+                state[0].multiplicationFactor =
                     std::clamp<uint8_t>(value, 0, 15);
-                write_am_vib_egt_ksr_mult(state);
+                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
                 break;
 
             case Operator::KEY_SCALE_LEVEL:
-                state.keyScaleLevel = 
+                state[0].keyScaleLevel = 
                     std::clamp<uint8_t>(value, 0, 3);
-                write_ksl_tl(state);
+                writeRegister(Register::KSL_TL, state[0]);
                 break;
 
             case Operator::TOLTAL_LEVEL:
-                state.totalLevel =
+                state[0].totalLevel =
                     std::clamp<uint8_t>(value, 0, 63);
-                write_ksl_tl(state);
+                writeRegister(Register::KSL_TL, state[0]);
                 break;
 
             case Operator::ATTACK_RATE:
-                state.attackRate =
+                state[0].attackRate =
                     std::clamp<uint8_t>(value, 0, 15);
-                write_ar_dr(state);
+                writeRegister(Register::AR_DR, state[0]);
                 break;
 
             case Operator::DECAY_RATE:
-                state.decayRate = 
+                state[0].decayRate = 
                     std::clamp<uint8_t>(value, 0, 15);
-                write_ar_dr(state);
+                writeRegister(Register::AR_DR, state[0]);
                 break;
 
             case Operator::SUSTAIN_LEVEL:
-                state.sustainLevel = 
+                state[0].sustainLevel = 
                     std::clamp<uint8_t>(value, 0, 15);
-                write_sl_rr(state);
+                writeRegister(Register::SL_RR, state[0]);
                 break;
 
             case Operator::RELEASE_RATE:
-                state.releaseRate = 
+                state[0].releaseRate = 
                     std::clamp<uint8_t>(value, 0, 15);
-                write_sl_rr(state);
+                writeRegister(Register::SL_RR, state[0]);
                 break;
 
             case Operator::WAVEFORM_SELECT:
-                state.waveformSelect = 
+                state[0].waveformSelect = 
                     std::clamp<uint8_t>(value, 0, 7);
+                writeRegister(Register::WS, state[0]);
                 break;
         }
     };
