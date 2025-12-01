@@ -13,7 +13,31 @@
 #define NUM_SAMPLES (SAMPLE_RATE * DURATION_SECONDS)
 
 enum class Operator {
-    AMPLITUDE_MODULATION,
+    OP_00, OP_01, OP_02, OP_03, OP_04, OP_05,
+    OP_06, OP_07, OP_08, OP_09, OP_10, OP_11,
+    OP_12, OP_13, OP_14, OP_15, OP_16, OP_17,
+
+    OP_18, OP_19, OP_20, OP_21, OP_22, OP_23,
+    OP_24, OP_25, OP_26, OP_27, OP_28, OP_29,
+    OP_30, OP_31, OP_32, OP_33, OP_34, OP_35
+};
+
+constexpr uint16_t getRegisterOffset(Operator op) {
+    constexpr uint16_t offsets[36] = {        
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+        0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+
+        0x100, 0x101, 0x102, 0x103, 0x104, 0x105,
+        0x108, 0x109, 0x10A, 0x10B, 0x10C, 0x10D,
+        0x110, 0x111, 0x112, 0x113, 0x114, 0x115
+    };
+    return offsets[static_cast<int>(op)];
+}
+
+
+enum class Parameter {
+    AMPLITUDE_MODULATION = 0,
     VIBRATO,
     ENVELOP_GENERATOR_TYPE,
     KEY_SCALING_RATE,
@@ -27,7 +51,7 @@ enum class Operator {
     WAVEFORM_SELECT,
 };
 
-std::function<void(Operator, uint8_t)> createChipOpl3() {
+std::function<void(Operator, Parameter, uint8_t)> createChipOpl3() {
     enum class Register {
         AM_VIB_EGT_MRS_MULT,
         KSL_TL,
@@ -52,7 +76,7 @@ std::function<void(Operator, uint8_t)> createChipOpl3() {
     };
     OperatorState state[36];
 
-    auto writeRegister = [](const Register reg, const OperatorState& state) {
+    auto writeRegister = [](const Operator& op, const Register& reg, const OperatorState& state) {
         uint8_t register_value = 0;
         
         switch (reg) {
@@ -86,79 +110,80 @@ std::function<void(Operator, uint8_t)> createChipOpl3() {
     };
     
     return [state, writeRegister]
-        (Operator op, uint8_t value) mutable {
+        (const Operator op, const Parameter par, uint8_t value) mutable {
 
-        switch (op) {
-            case Operator::AMPLITUDE_MODULATION:
-                state[0].amplitudeModulation = 
+        int idx = static_cast<int>(op);
+        switch (par) {
+            case Parameter::AMPLITUDE_MODULATION:
+                state[idx].amplitudeModulation = 
                     std::clamp<uint8_t>(value, 0, 1);
-                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
+                writeRegister(op, Register::AM_VIB_EGT_MRS_MULT, state[idx]);
                 break;
 
-            case Operator::VIBRATO:
-                state[0].vibrato = 
+            case Parameter::VIBRATO:
+                state[idx].vibrato = 
                     std::clamp<uint8_t>(value, 0, 1);
-                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
+                writeRegister(op, Register::AM_VIB_EGT_MRS_MULT, state[idx]);
                 break;
 
-            case Operator::ENVELOP_GENERATOR_TYPE:
-                state[0].envelopGeneratorType =
+            case Parameter::ENVELOP_GENERATOR_TYPE:
+                state[idx].envelopGeneratorType =
                     std::clamp<uint8_t>(value, 0, 1);
-                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
+                writeRegister(op, Register::AM_VIB_EGT_MRS_MULT, state[idx]);
                 break;                
 
-            case Operator::KEY_SCALING_RATE:
-                state[0].keyScalingRate =
+            case Parameter::KEY_SCALING_RATE:
+                state[idx].keyScalingRate =
                     std::clamp<uint8_t>(value, 0, 1);
-                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
+                writeRegister(op, Register::AM_VIB_EGT_MRS_MULT, state[idx]);
                 break;
 
-            case Operator::MULTIPLICATION_FACTOR:
-                state[0].multiplicationFactor =
+            case Parameter::MULTIPLICATION_FACTOR:
+                state[idx].multiplicationFactor =
                     std::clamp<uint8_t>(value, 0, 15);
-                writeRegister(Register::AM_VIB_EGT_MRS_MULT, state[0]);
+                writeRegister(op, Register::AM_VIB_EGT_MRS_MULT, state[idx]);
                 break;
 
-            case Operator::KEY_SCALE_LEVEL:
-                state[0].keyScaleLevel = 
+            case Parameter::KEY_SCALE_LEVEL:
+                state[idx].keyScaleLevel = 
                     std::clamp<uint8_t>(value, 0, 3);
-                writeRegister(Register::KSL_TL, state[0]);
+                writeRegister(op, Register::KSL_TL, state[idx]);
                 break;
 
-            case Operator::TOLTAL_LEVEL:
-                state[0].totalLevel =
+            case Parameter::TOLTAL_LEVEL:
+                state[idx].totalLevel =
                     std::clamp<uint8_t>(value, 0, 63);
-                writeRegister(Register::KSL_TL, state[0]);
+                writeRegister(op, Register::KSL_TL, state[idx]);
                 break;
 
-            case Operator::ATTACK_RATE:
-                state[0].attackRate =
+            case Parameter::ATTACK_RATE:
+                state[idx].attackRate =
                     std::clamp<uint8_t>(value, 0, 15);
-                writeRegister(Register::AR_DR, state[0]);
+                writeRegister(op, Register::AR_DR, state[idx]);
                 break;
 
-            case Operator::DECAY_RATE:
-                state[0].decayRate = 
+            case Parameter::DECAY_RATE:
+                state[idx].decayRate = 
                     std::clamp<uint8_t>(value, 0, 15);
-                writeRegister(Register::AR_DR, state[0]);
+                writeRegister(op, Register::AR_DR, state[idx]);
                 break;
 
-            case Operator::SUSTAIN_LEVEL:
-                state[0].sustainLevel = 
+            case Parameter::SUSTAIN_LEVEL:
+                state[idx].sustainLevel = 
                     std::clamp<uint8_t>(value, 0, 15);
-                writeRegister(Register::SL_RR, state[0]);
+                writeRegister(op, Register::SL_RR, state[idx]);
                 break;
 
-            case Operator::RELEASE_RATE:
-                state[0].releaseRate = 
+            case Parameter::RELEASE_RATE:
+                state[idx].releaseRate = 
                     std::clamp<uint8_t>(value, 0, 15);
-                writeRegister(Register::SL_RR, state[0]);
+                writeRegister(op, Register::SL_RR, state[idx]);
                 break;
 
-            case Operator::WAVEFORM_SELECT:
-                state[0].waveformSelect = 
+            case Parameter::WAVEFORM_SELECT:
+                state[idx].waveformSelect = 
                     std::clamp<uint8_t>(value, 0, 7);
-                writeRegister(Register::WS, state[0]);
+                writeRegister(op, Register::WS, state[idx]);
                 break;
         }
     };
@@ -194,7 +219,7 @@ void begin(opl3_chip *chip, uint32_t sample_rate) {
     OPL3_WriteReg(chip, 0xBD, *(uint8_t*)&bd);
 
     auto chipOpl3 = createChipOpl3();
-    chipOpl3(Operator::AMPLITUDE_MODULATION, 5);
+    chipOpl3(Operator::OP_01, Parameter::AMPLITUDE_MODULATION, 5);
 }
 
 int main(void) {
