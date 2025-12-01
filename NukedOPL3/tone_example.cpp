@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <algorithm>
 
+#include <iostream>
+#include <chrono>
+
 #define SAMPLE_RATE 49716
 #define DURATION_SECONDS 2
 #define NUM_SAMPLES (SAMPLE_RATE * DURATION_SECONDS)
@@ -318,7 +321,17 @@ int main(void) {
     }
     
     // Generate audio samples & write to file
+
+    using clock = std::chrono::high_resolution_clock;
+    using ms    = std::chrono::milliseconds;
+        
+    auto start = clock::now();
     OPL3_GenerateStream(&chip, stream_buffer, NUM_SAMPLES);
+    auto ende = clock::now();
+
+    auto dauer_ms = std::chrono::duration_cast<ms>(ende - start);
+    std::cout << "Duration: " << dauer_ms.count() << " ms\n";
+
     fwrite(stream_buffer, sizeof(int16_t), NUM_SAMPLES * 2, output);
     
     free(stream_buffer);
