@@ -1,0 +1,10 @@
+{
+	"authors": [
+		"Sören Sofke"
+	],
+	"description": "A minimal D application in betterC mode.",
+	"license": "proprietary",
+	"name": "betterc",
+	"targetType": "executable",
+    "dflags": ["-betterC"]
+}
