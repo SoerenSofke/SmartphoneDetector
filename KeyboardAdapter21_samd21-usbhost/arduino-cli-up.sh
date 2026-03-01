@@ -4,9 +4,19 @@
 curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
 
 
+# Seeed SAMD Boards zur config hinzufügen
+./bin/arduino-cli config add board_manager.additional_urls \
+  https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
+
+
+# Index aktualisieren und Paket installieren
+./bin/arduino-cli core update-index
+./bin/arduino-cli core install Seeeduino:samd
+
+
 # SAMD21 Core installieren
 ./bin/arduino-cli core search --all
-./bin/arduino-cli core install arduino:samd@1.8.14 
+./bin/arduino-cli core install Seeeduino:samd@1.8.5 
 
 
 # Bibliotheken installieren
