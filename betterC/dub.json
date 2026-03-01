@@ -5,6 +5,16 @@
 	"description": "A minimal D application in betterC mode.",
 	"license": "proprietary",
 	"name": "betterc",
-	"targetType": "executable",
-    "dflags": ["-betterC"]
+
+    "targetType": "staticLibrary",
+    "targetPath": "lib",
+    "targetName": "sumlib",
+
+    "sourcePaths": ["dlib"],
+    "importPaths": ["dlib"],
+	
+    "dflags": ["-betterC"],
+	"dependencies": {
+        "mir-algorithm": "~>3.22"
+    }
 }
