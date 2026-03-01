@@ -22,4 +22,5 @@ curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.
 # Bibliotheken installieren
 ./bin/arduino-cli lib search USBHost --verbose
 ./bin/arduino-cli lib install "USBHost@1.0.5"
+./bin/arduino-cli lib install "Adafruit CH9328@1.0.0"
 
