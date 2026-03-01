@@ -1,39 +1,36 @@
+
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 #pragma message("__cplusplus: " TOSTRING(__cplusplus))
 
-#include <Adafruit_NeoPixel.h>
-#include <KeyboardController.h>
 
-Adafruit_NeoPixel pixels(1, PIN_NEOPIXEL);
+#define LED_ON  LOW
+#define LED_OFF HIGH
+
+#include<KeyboardController.h>
+
 USBHost usb;
 
 KeyboardController keyboard(usb);
 
-void setup(){  
-  pixels.begin();
+const int ledPin = 13;
+
+void setup()
+{
+  pinMode(ledPin, OUTPUT);
 }
 
-void keyPressed(){    
-    pixels.setPixelColor(0, pixels.Color(255, 0, 0));    
-    pixels.show();
-  
-    delay(10);
-    
-    pixels.clear();
-    pixels.show();
+void keyPressed()
+{
+  digitalWrite(ledPin, LED_ON);
 }
 
-void keyReleased() {
-    pixels.setPixelColor(0, pixels.Color(0, 255, 0));
-    pixels.show();
-  
-    delay(10);
-    
-    pixels.clear();
-    pixels.show();
+void keyReleased()
+{
+  digitalWrite(ledPin, LED_OFF);
 }
 
-void loop(){
+void loop()
+{
   usb.Task();
 }
