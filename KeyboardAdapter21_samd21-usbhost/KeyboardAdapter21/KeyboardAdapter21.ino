@@ -23,7 +23,8 @@ void setup()
 
 void keyPressed()
 {
-  hid.typeString("a");
+  char buf[2] = { (char)keyboard.getKey(), '\0' };
+  hid.typeString(buf);
 }
 
 void keyReleased()
