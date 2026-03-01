@@ -3,13 +3,13 @@
 # Arduino CLI installieren
 curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
 
-# Core-Index aktualisieren
-arduino-cli core update-index --additional-urls https://adafruit.github.io/arduino-board-index/package_adafruit_index.json
 
-# ESP32 Core installieren
-arduino-cli core install adafruit:samd@1.7.16 --additional-urls https://adafruit.github.io/arduino-board-index/package_adafruit_index.json
+# SAMD21 Core installieren
+./bin/arduino-cli core search --all
+./bin/arduino-cli core install arduino:samd@1.8.14 
 
 
 # Bibliotheken installieren
-arduino-cli lib install "Adafruit NeoPixel"
-arduino-cli lib install "USBHost"
+./bin/arduino-cli lib search USBHost --verbose
+./bin/arduino-cli lib install "USBHost@1.0.5"
+
