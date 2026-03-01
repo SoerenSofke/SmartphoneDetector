@@ -14,24 +14,24 @@ const int ledPin = 13;
 void setup()
 {
   pinMode(ledPin, OUTPUT);
-  
+
   Serial1.begin(9600);
-  while (!Serial1) delay(100);
+  while (!Serial1)
+    delay(100);
   hid.begin(&Serial1);
 }
 
 void keyPressed()
 {
-  digitalWrite(ledPin, LED_ON);
   hid.typeString("a");
 }
 
 void keyReleased()
 {
-  digitalWrite(ledPin, LED_OFF);
 }
 
 void loop()
 {
   usb.Task();
+  digitalWrite(ledPin, usb.getUsbTaskState() == USB_STATE_RUNNING ? LED_ON : LED_OFF);
 }
