@@ -23,7 +23,7 @@ void setup()
 
 void keyPressed()
 {
-  char buf[2] = { (char)keyboard.getKey(), '\0' };
+  char buf[2] = {(char)keyboard.getKey(), '\0'};
   hid.typeString(buf);
 }
 
