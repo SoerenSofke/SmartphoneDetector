@@ -11,6 +11,27 @@ KeyboardController keyboard(usb);
 
 const int ledPin = 13;
 
+const uint8_t *layer0 = nullptr;
+
+inline const uint8_t *getLayer0()
+{
+  static uint8_t layer[111];
+  static bool initialized = false;
+
+  if (!initialized)
+  {
+    memset(layer, 0x00, sizeof(layer));
+    layer[110] = 0;  layer[103] = 1;  layer[102] = 2;  layer[57] = 3;  layer[56] = 4;  layer[49] = 5;
+    layer[109] = 6;  layer[104] = 7;  layer[101] = 8;  layer[48] = 9;  layer[55] = 10; layer[50] = 11;
+    layer[108] = 12; layer[105] = 13; layer[100] = 14; layer[97] = 15; layer[54] = 16; layer[51] = 17;
+    layer[107] = 18; layer[106] = 19; layer[ 99] = 20; layer[98] = 21; layer[53] = 22; layer[52] = 23;
+        
+    initialized = true;
+  }
+
+  return layer;
+}
+
 void setup()
 {
   pinMode(ledPin, OUTPUT);
@@ -19,13 +40,19 @@ void setup()
   while (!Serial1)
     delay(100);
   hid.begin(&Serial1);
+
+  layer0 = getLayer0();
 }
+
 
 void keyPressed()
 {
-  int keyValue = (int)keyboard.getKey();
+  int indexValue = (int)keyboard.getKey();
+  
+  if (indexValue < 0 || indexValue > 110) return;
+  
   char buf[12];
-  snprintf(buf, sizeof(buf), "%d", keyValue);
+  snprintf(buf, sizeof(buf), "%d", layer0[indexValue]);
   hid.typeString(buf);
 }
 
