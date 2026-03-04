@@ -1,6 +1,12 @@
 #define LED_ON LOW
 #define LED_OFF HIGH
 
+#define KEY_A           0x04
+#define KEY_ENTER       0x28
+#define KEY_BACKSPACE   0x2A
+
+
+
 #include <KeyboardController.h>
 #include <Adafruit_CH9328.h>
 
@@ -23,10 +29,10 @@ inline const uint8_t *getLayer0()
     memset(layer, 0x00, sizeof(layer));
 
     // clang-format off
-    layer[110] = 0;  layer[103] = 1;  layer[102] = 2;  layer[57] = 3;  layer[56] = 4;  layer[49] = 5;
-    layer[109] = 6;  layer[104] = 7;  layer[101] = 8;  layer[48] = 9;  layer[55] = 10; layer[50] = 11;
-    layer[108] = 12; layer[105] = 13; layer[100] = 14; layer[97] = 15; layer[54] = 16; layer[51] = 17;
-    layer[107] = 18; layer[106] = 19; layer[ 99] = 20; layer[98] = 21; layer[53] = 22; layer[52] = 23;
+    layer[110] = KEY_A; layer[103] = KEY_A; layer[102] = KEY_A; layer[57] = KEY_A; layer[56] = KEY_A; layer[49] = KEY_BACKSPACE;
+    layer[109] = KEY_A; layer[104] = KEY_A; layer[101] = KEY_A; layer[48] = KEY_A; layer[55] = KEY_A; layer[50] = KEY_ENTER;
+    layer[108] = KEY_A; layer[105] = KEY_A; layer[100] = KEY_A; layer[97] = KEY_A; layer[54] = KEY_A; layer[51] = KEY_A;
+    layer[107] = KEY_A; layer[106] = KEY_A; layer[ 99] = KEY_A; layer[98] = KEY_A; layer[53] = KEY_A; layer[52] = KEY_A;
     // clang-format on
 
     initialized = true;
@@ -61,11 +67,16 @@ void keyPressed()
 
   char buf[12];
   snprintf(buf, sizeof(buf), "%d", layer0[idx]);
-  hid.typeString(buf);
+  // hid.typeString(buf);
+
+  byte keys[6] = {layer0[idx], 0, 0, 0, 0, 0};
+  hid.sendKeyPress(keys, 0);
 }
 
 void keyReleased()
 {
+  byte noKeysPressed[6] = {0, 0, 0, 0, 0, 0};
+  hid.sendKeyPress(noKeysPressed, 0);
 }
 
 void loop()
