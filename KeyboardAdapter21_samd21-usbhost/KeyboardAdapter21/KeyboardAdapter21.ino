@@ -23,7 +23,9 @@ void setup()
 
 void keyPressed()
 {
-  char buf[2] = {(char)keyboard.getKey(), '\0'};
+  int keyValue = (int)keyboard.getKey();
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%d", keyValue);
   hid.typeString(buf);
 }
 
