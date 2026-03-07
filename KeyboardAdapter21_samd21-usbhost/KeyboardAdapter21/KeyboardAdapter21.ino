@@ -109,6 +109,8 @@ void keyPressed()
   else
   {
     byte key = (byte)code;
+    if (key == 0)
+      return;
 
     bool alreadyPressed = false;
     for (int i = 0; i < 6; i++)
@@ -140,31 +142,33 @@ void keyReleased()
 {
   char keyCode = keyboard.getKey();
 
-  if (keyCode != '\0')
+  if (keyCode == '\0')
+    return;
+
+  int idx = (int)keyCode;
+  if (idx < 0 || idx > 110)
+    return;
+
+  int16_t code = layer0[idx];
+
+  if (code < 0)
   {
-    int idx = (int)keyCode;
-    if (idx >= 0 && idx <= 110)
+    modifiers &= ~((byte)(-code));
+  }
+  else
+  {
+    byte key = (byte)code;
+    if (key == 0)
+      return;
+
+    for (int i = 0; i < 6; i++)
     {
-      int16_t code = layer0[idx];
-
-      if (code < 0)
+      if (pressedKeys[i] == key)
       {
-        modifiers &= ~((byte)(-code));
-      }
-      else
-      {
-        byte key = (byte)code;
-
-        for (int i = 0; i < 6; i++)
-        {
-          if (pressedKeys[i] == key)
-          {
-            for (int j = i; j < 5; j++)
-              pressedKeys[j] = pressedKeys[j + 1];
-            pressedKeys[5] = 0;
-            break;
-          }
-        }
+        for (int j = i; j < 5; j++)
+          pressedKeys[j] = pressedKeys[j + 1];
+        pressedKeys[5] = 0;
+        break;
       }
     }
   }
