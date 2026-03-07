@@ -2,17 +2,32 @@
 #define LED_OFF HIGH
 
 // clang-format off
-#define MOD_L_CTRL    -0x01
-#define MOD_L_SHIFT   -0x02
-#define MOD_L_ALT     -0x04
-#define MOD_L_GUI     -0x08
-#define MOD_R_CTRL    -0x10
-#define MOD_R_SHIFT   -0x20
-#define MOD_R_ALT     -0x40
-#define MOD_R_GUI     -0x80
+#define ML_CTRL      -0x01
+#define ML_SHIFT     -0x02
+#define ML_ALT       -0x04
+#define ML_GUI       -0x08
+#define MR_CTRL      -0x10
+#define MR_SHIFT     -0x20
+#define MR_ALT       -0x40
+#define MR_GUI       -0x80
 
-#define KEY_ENTER     0x28
-#define KEY_BACKSPACE 0x2A
+#define C_ENTER       0x28
+#define C_ESCAPE      0x29
+#define C_BACKSPACE   0x2A
+#define C_TAB         0x2B
+#define C_SPACE       0x2C
+
+#define C_UP          0x52
+#define C_DOWN        0x51
+#define C_LEFT        0x50
+#define C_RIGHT       0x4F
+
+#define C_INSERT      0x49
+#define C_DELETE      0x4C
+#define C_HOME        0x4A
+#define C_END         0x4D
+#define C_PAGE_UP     0x4B
+#define C_PAGE_DOWN   0x4E
 
 #define KEY_A         0x04
 #define KEY_B         0x05
@@ -66,10 +81,10 @@ inline const int16_t *getLayer0()
     memset(layer, 0x00, sizeof(layer));
 
     // clang-format off
-    layer[110] = KEY_J; layer[103] = KEY_L; layer[102] = KEY_U; layer[57] = KEY_Y; layer[56] = KEY_A; layer[49] = KEY_BACKSPACE;
-    layer[109] = KEY_H; layer[104] = KEY_N; layer[101] = KEY_E; layer[48] = KEY_I; layer[55] = KEY_O; layer[50] = KEY_ENTER;
-    layer[108] = KEY_K; layer[105] = KEY_M; layer[100] = KEY_A; layer[97] = KEY_A; layer[54] = KEY_A; layer[51] = MOD_R_SHIFT;
-    layer[107] = KEY_A; layer[106] = KEY_A; layer[ 99] = KEY_A; layer[98] = KEY_A; layer[53] = KEY_A; layer[52] = KEY_A;
+    layer[110] = KEY_J;   layer[103] = KEY_L;   layer[102] = KEY_U;   layer[57] = KEY_Y;  layer[56] = KEY_A;  layer[49] = C_BACKSPACE;
+    layer[109] = KEY_H;   layer[104] = KEY_N;   layer[101] = KEY_E;   layer[48] = KEY_I;  layer[55] = KEY_O;  layer[50] = C_ENTER;
+    layer[108] = KEY_K;   layer[105] = KEY_M;   layer[100] = KEY_A;   layer[97] = KEY_A;  layer[54] = C_UP;   layer[51] = MR_SHIFT;
+    layer[107] = C_SPACE; layer[106] = C_SPACE; layer[ 99] = C_SPACE; layer[98] = C_LEFT; layer[53] = C_DOWN; layer[52] = C_RIGHT;
     // clang-format on
 
     initialized = true;
@@ -90,88 +105,74 @@ void setup()
   layer0 = getLayer0();
 }
 
-void keyPressed()
+int16_t getCode()
 {
   char keyCode = keyboard.getKey();
   if (keyCode == '\0')
-    return;
+    return 0;
 
   int idx = (int)keyCode;
   if (idx < 0 || idx > 110)
+    return 0;
+
+  return layer0[idx];
+}
+
+void pressKey(byte key)
+{
+  for (int i = 0; i < 6; i++)
+  {
+    if (pressedKeys[i] == key)
+      return;
+  }
+  for (int i = 0; i < 6; i++)
+  {
+    if (pressedKeys[i] == 0)
+    {
+      pressedKeys[i] = key;
+      return;
+    }
+  }
+}
+
+void releaseKey(byte key)
+{
+  for (int i = 0; i < 6; i++)
+  {
+    if (pressedKeys[i] == key)
+    {
+      for (int j = i; j < 5; j++)
+        pressedKeys[j] = pressedKeys[j + 1];
+      pressedKeys[5] = 0;
+      return;
+    }
+  }
+}
+
+void keyPressed()
+{
+  int16_t code = getCode();
+  if (code == 0)
     return;
 
-  int16_t code = layer0[idx];
-
   if (code < 0)
-  {
     modifiers |= (byte)(-code);
-  }
   else
-  {
-    byte key = (byte)code;
-    if (key == 0)
-      return;
-
-    bool alreadyPressed = false;
-    for (int i = 0; i < 6; i++)
-    {
-      if (pressedKeys[i] == key)
-      {
-        alreadyPressed = true;
-        break;
-      }
-    }
-
-    if (!alreadyPressed)
-    {
-      for (int i = 0; i < 6; i++)
-      {
-        if (pressedKeys[i] == 0)
-        {
-          pressedKeys[i] = key;
-          break;
-        }
-      }
-    }
-  }
+    pressKey((byte)code);
 
   hid.sendKeyPress(pressedKeys, modifiers);
 }
 
 void keyReleased()
 {
-  char keyCode = keyboard.getKey();
-
-  if (keyCode == '\0')
+  int16_t code = getCode();
+  if (code == 0)
     return;
-
-  int idx = (int)keyCode;
-  if (idx < 0 || idx > 110)
-    return;
-
-  int16_t code = layer0[idx];
 
   if (code < 0)
-  {
     modifiers &= ~((byte)(-code));
-  }
   else
-  {
-    byte key = (byte)code;
-    if (key == 0)
-      return;
-
-    for (int i = 0; i < 6; i++)
-    {
-      if (pressedKeys[i] == key)
-      {
-        for (int j = i; j < 5; j++)
-          pressedKeys[j] = pressedKeys[j + 1];
-        pressedKeys[5] = 0;
-        break;
-      }
-    }
-  }
+    releaseKey((byte)code);
 
   hid.sendKeyPress(pressedKeys, modifiers);
 }
