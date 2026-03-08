@@ -1,15 +1,18 @@
+#include <KeyboardController.h>
+#include <Adafruit_CH9328.h>
+
 #define LED_ON LOW
 #define LED_OFF HIGH
 
 // clang-format off
-#define ML_CTRL      -0x01
-#define ML_SHIFT     -0x02
-#define ML_ALT       -0x04
-#define ML_GUI       -0x08
-#define MR_CTRL      -0x10
-#define MR_SHIFT     -0x20
-#define MR_ALT       -0x40
-#define MR_GUI       -0x80
+#define ML_CTRL      ((int16_t)-0x01)
+#define ML_SHIFT     ((int16_t)-0x02)
+#define ML_ALT       ((int16_t)-0x04)
+#define ML_GUI       ((int16_t)-0x08)
+#define MR_CTRL      ((int16_t)-0x10)
+#define MR_SHIFT     ((int16_t)-0x20)
+#define MR_ALT       ((int16_t)-0x40)
+#define MR_GUI       ((int16_t)-0x80)
 
 #define C_ENTER       0x28
 #define C_ESCAPE      0x29
@@ -56,9 +59,6 @@
 #define KEY_Y         0x1C
 #define KEY_Z         0x1D
 // clang-format on
-
-#include <KeyboardController.h>
-#include <Adafruit_CH9328.h>
 
 Adafruit_CH9328 hid;
 
@@ -111,8 +111,7 @@ void setup()
   deviceRole = (digitalRead(D3) == LOW) ? DeviceRole::CONTROLLER : DeviceRole::PERIPHERAL;
 
   Serial1.begin(9600);
-  while (!Serial1)
-    delay(100);
+  delay(2000); // Give CH9328 time to boot
   hid.begin(&Serial1);
 
   layer0 = getLayer0();
@@ -120,11 +119,11 @@ void setup()
 
 int16_t getCode()
 {
-  char keyCode = keyboard.getKey();
-  if (keyCode == '\0')
+  int keyCode = keyboard.getKey();
+  if (keyCode == 0)
     return 0;
 
-  int idx = (int)keyCode;
+  int idx = keyCode;
   if (idx < 0 || idx > 110)
     return 0;
 
@@ -162,12 +161,6 @@ void releaseKey(byte key)
   }
 }
 
-// KeyboardController.h: Callback for key press event on physical keyboard connected to USB host
-void keyPressed()
-{
-  (deviceRole == DeviceRole::CONTROLLER) ? keyPressedController() : keyPressedPeripheral();
-}
-
 void keyPressedController()
 {
   int16_t code = getCode();
@@ -184,17 +177,17 @@ void keyPressedController()
 
 void keyPressedPeripheral()
 {
-    int keyCode = keyboard.getKey();
-    if (keyCode == 0)
-        return;
+  int keyCode = keyboard.getKey();
+  if (keyCode == 0)
+    return;
 
-    Serial.write((uint8_t) keyCode);   // 1 to 127
+  Serial1.write((uint8_t)(int8_t)(keyCode)); // 1 to 127
 }
 
-// KeyboardController.h: Callback for key release event on physical keyboard connected to USB host
-void keyReleased()
+// KeyboardController.h: Callback for key press event on physical keyboard connected to USB host
+void keyPressed()
 {
-  (deviceRole == DeviceRole::CONTROLLER) ? keyReleasedController() : keyReleasedPeripheral();
+  (deviceRole == DeviceRole::CONTROLLER) ? keyPressedController() : keyPressedPeripheral();
 }
 
 void keyReleasedController()
@@ -213,11 +206,17 @@ void keyReleasedController()
 
 void keyReleasedPeripheral()
 {
-    int keyCode = keyboard.getKey();
-    if (keyCode == 0)
-        return;
+  int keyCode = keyboard.getKey();
+  if (keyCode == 0)
+    return;
 
-    Serial.write((uint8_t) -keyCode);  // -1 to -127
+  Serial1.write((uint8_t)(int8_t)(-keyCode)); // -1 to -127
+}
+
+// KeyboardController.h: Callback for key release event on physical keyboard connected to USB host
+void keyReleased()
+{
+  (deviceRole == DeviceRole::CONTROLLER) ? keyReleasedController() : keyReleasedPeripheral();
 }
 
 void loop()
