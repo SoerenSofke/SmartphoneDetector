@@ -184,6 +184,11 @@ void keyPressedController()
 
 void keyPressedPeripheral()
 {
+    int keyCode = keyboard.getKey();
+    if (keyCode == 0)
+        return;
+
+    Serial.write((uint8_t) keyCode);   // 1 to 127
 }
 
 // KeyboardController.h: Callback for key release event on physical keyboard connected to USB host
@@ -208,6 +213,11 @@ void keyReleasedController()
 
 void keyReleasedPeripheral()
 {
+    int keyCode = keyboard.getKey();
+    if (keyCode == 0)
+        return;
+
+    Serial.write((uint8_t) -keyCode);  // -1 to -127
 }
 
 void loop()
