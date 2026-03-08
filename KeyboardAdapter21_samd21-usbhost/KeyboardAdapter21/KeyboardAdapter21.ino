@@ -162,7 +162,13 @@ void releaseKey(byte key)
   }
 }
 
+// KeyboardController.h: Callback for key press event on physical keyboard connected to USB host
 void keyPressed()
+{
+  (deviceRole == DeviceRole::CONTROLLER) ? keyPressedController() : keyPressedPeripheral();
+}
+
+void keyPressedController()
 {
   int16_t code = getCode();
   if (code == 0)
@@ -176,7 +182,17 @@ void keyPressed()
   hid.sendKeyPress(pressedKeys, modifiers);
 }
 
+void keyPressedPeripheral()
+{
+}
+
+// KeyboardController.h: Callback for key release event on physical keyboard connected to USB host
 void keyReleased()
+{
+  (deviceRole == DeviceRole::CONTROLLER) ? keyReleasedController() : keyReleasedPeripheral();
+}
+
+void keyReleasedController()
 {
   int16_t code = getCode();
   if (code == 0)
@@ -188,6 +204,10 @@ void keyReleased()
     releaseKey((byte)code);
 
   hid.sendKeyPress(pressedKeys, modifiers);
+}
+
+void keyReleasedPeripheral()
+{
 }
 
 void loop()
