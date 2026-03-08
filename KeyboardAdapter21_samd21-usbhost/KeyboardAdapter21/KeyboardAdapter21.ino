@@ -72,14 +72,65 @@ enum class DeviceRole
   PERIPHERAL  // Pin D3 → open (HIGH, Pull-up)
 };
 
-constexpr uint8_t LED_PIN = 13;
-constexpr uint8_t RX_LED_PIN = 18; // PA18
-constexpr uint8_t TX_LED_PIN = 19; // PA19
+DeviceRole deviceRole;
 
+constexpr uint8_t LED_PIN = 13;
 const int16_t *layer0 = nullptr;
 
 uint8_t pressedKeys[6] = {0, 0, 0, 0, 0, 0};
 uint8_t modifiers = 0;
+
+struct LedPulser
+{
+  uint8_t pin;
+  bool active;
+  bool baseState;
+  unsigned long startMs;
+  unsigned long durationMs;
+
+  void begin(uint8_t ledPin, bool idleState)
+  {
+    pin = ledPin;
+    baseState = idleState;
+    active = false;
+    startMs = 0;
+    durationMs = 0;
+
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, baseState);
+  }
+
+  void startPulse(unsigned long onTimeMs)
+  {
+    if (onTimeMs == 0)
+      onTimeMs = 1;
+
+    durationMs = onTimeMs;
+    startMs = millis();
+    active = true;
+
+    digitalWrite(pin, !baseState);
+  }
+
+  void update(bool idleState)
+  {
+    if (!active)
+    {
+      baseState = idleState;
+      digitalWrite(pin, baseState);
+      return;
+    }
+
+    unsigned long now = millis();
+    if ((unsigned long)(now - startMs) >= durationMs)
+    {
+      digitalWrite(pin, baseState);
+      active = false;
+    }
+  }
+};
+
+LedPulser ledPulser;
 
 inline const int16_t *getLayer0()
 {
@@ -103,11 +154,9 @@ inline const int16_t *getLayer0()
   return layer;
 }
 
-DeviceRole deviceRole;
-
 void setup()
 {
-  pinMode(LED_PIN, OUTPUT);
+  ledPulser.begin(LED_PIN, LED_OFF);
 
   // Read device role from pin D3
   pinMode(D3, INPUT_PULLUP);
@@ -180,6 +229,7 @@ void keyPressedController()
     pressKey((uint8_t)code);
 
   hid.sendKeyPress(pressedKeys, modifiers);
+  ledPulser.startPulse(50);
 }
 
 void keyPressedPeripheral()
@@ -190,6 +240,7 @@ void keyPressedPeripheral()
 
   // Send positive key code (encoded as int8_t) to signal key press
   Serial1.write((uint8_t)(int8_t)(keyCode)); // 1 to 127
+  ledPulser.startPulse(50);
 }
 
 // KeyboardController.h: Callback for key press event on physical keyboard connected to USB host
@@ -210,6 +261,7 @@ void keyReleasedController()
     releaseKey((uint8_t)code);
 
   hid.sendKeyPress(pressedKeys, modifiers);
+  ledPulser.startPulse(50);
 }
 
 void keyReleasedPeripheral()
@@ -220,6 +272,7 @@ void keyReleasedPeripheral()
 
   // Send negative key code (encoded as int8_t) to signal key release
   Serial1.write((uint8_t)(int8_t)(-keyCode)); // -1 to -127
+  ledPulser.startPulse(50);
 }
 
 // KeyboardController.h: Callback for key release event on physical keyboard connected to USB host
@@ -231,14 +284,15 @@ void keyReleased()
 void loop()
 {
   usb.Task();
-  digitalWrite(LED_PIN, usb.getUsbTaskState() == USB_STATE_RUNNING ? LED_ON : LED_OFF);
+  ledPulser.update(usb.getUsbTaskState() == USB_STATE_RUNNING ? LED_ON : LED_OFF);
 
   if (deviceRole == DeviceRole::CONTROLLER && Serial1.available() > 0)
   {
     int b = Serial1.read();
     (void)b;
 
-    digitalWrite(LED_PIN, digitalRead(LED_PIN) == HIGH ? LOW : HIGH);
-    delay(200);
+    // digitalWrite(LED_PIN, digitalRead(LED_PIN) == HIGH ? LOW : HIGH);
+    // delay(200);
+    ledPulser.startPulse(50);
   }
 }
