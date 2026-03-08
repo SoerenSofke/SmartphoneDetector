@@ -72,7 +72,10 @@ enum class DeviceRole
   PERIPHERAL  // Pin D3 → open (HIGH, Pull-up)
 };
 
-constexpr int ledPin = 13;
+constexpr uint8_t LED_PIN = 13;
+constexpr uint8_t RX_LED_PIN = 18; // PA18
+constexpr uint8_t TX_LED_PIN = 19; // PA19
+
 const int16_t *layer0 = nullptr;
 
 uint8_t pressedKeys[6] = {0, 0, 0, 0, 0, 0};
@@ -104,7 +107,7 @@ DeviceRole deviceRole;
 
 void setup()
 {
-  pinMode(ledPin, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
 
   // Read device role from pin D3
   pinMode(D3, INPUT_PULLUP);
@@ -228,14 +231,14 @@ void keyReleased()
 void loop()
 {
   usb.Task();
-  digitalWrite(ledPin, usb.getUsbTaskState() == USB_STATE_RUNNING ? LED_ON : LED_OFF);
+  digitalWrite(LED_PIN, usb.getUsbTaskState() == USB_STATE_RUNNING ? LED_ON : LED_OFF);
 
   if (deviceRole == DeviceRole::CONTROLLER && Serial1.available() > 0)
   {
     int b = Serial1.read();
     (void)b;
 
-    digitalWrite(ledPin, digitalRead(ledPin) == HIGH ? LOW : HIGH);
+    digitalWrite(LED_PIN, digitalRead(LED_PIN) == HIGH ? LOW : HIGH);
     delay(200);
   }
 }
