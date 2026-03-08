@@ -93,9 +93,22 @@ inline const int16_t *getLayer0()
   return layer;
 }
 
+enum class DeviceRole
+{
+  CONTROLLER, // Pin D3 → GND  (LOW)
+  PERIPHERAL  // Pin D3 → open (HIGH, Pull-up)
+};
+
+DeviceRole deviceRole;
+
 void setup()
 {
   pinMode(ledPin, OUTPUT);
+
+  // Read device role from pin D3
+  pinMode(D3, INPUT_PULLUP);
+  delay(1); // Give pull-up time to charge
+  deviceRole = (digitalRead(D3) == LOW) ? DeviceRole::CONTROLLER : DeviceRole::PERIPHERAL;
 
   Serial1.begin(9600);
   while (!Serial1)
