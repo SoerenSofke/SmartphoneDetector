@@ -290,9 +290,6 @@ void loop()
   {
     int b = Serial1.read();
     (void)b;
-
-    // digitalWrite(LED_PIN, digitalRead(LED_PIN) == HIGH ? LOW : HIGH);
-    // delay(200);
     ledPulser.startPulse(50);
   }
 }
