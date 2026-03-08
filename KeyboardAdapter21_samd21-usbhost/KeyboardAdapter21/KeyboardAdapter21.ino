@@ -5,6 +5,7 @@
 #define LED_OFF HIGH
 
 // clang-format off
+// Negative values in the layer table encode "modifier bitmask"
 #define ML_CTRL      ((int16_t)-0x01)
 #define ML_SHIFT     ((int16_t)-0x02)
 #define ML_ALT       ((int16_t)-0x04)
@@ -65,11 +66,17 @@ Adafruit_CH9328 hid;
 USBHost usb;
 KeyboardController keyboard(usb);
 
-const int ledPin = 13;
+enum class DeviceRole
+{
+  CONTROLLER, // Pin D3 → GND  (LOW)
+  PERIPHERAL  // Pin D3 → open (HIGH, Pull-up)
+};
+
+constexpr int ledPin = 13;
 const int16_t *layer0 = nullptr;
 
-byte pressedKeys[6] = {0, 0, 0, 0, 0, 0};
-byte modifiers = 0;
+uint8_t pressedKeys[6] = {0, 0, 0, 0, 0, 0};
+uint8_t modifiers = 0;
 
 inline const int16_t *getLayer0()
 {
@@ -92,12 +99,6 @@ inline const int16_t *getLayer0()
 
   return layer;
 }
-
-enum class DeviceRole
-{
-  CONTROLLER, // Pin D3 → GND  (LOW)
-  PERIPHERAL  // Pin D3 → open (HIGH, Pull-up)
-};
 
 DeviceRole deviceRole;
 
@@ -123,6 +124,9 @@ int16_t getCode()
   if (keyCode == 0)
     return 0;
 
+  if (layer0 == nullptr)
+    return 0;
+
   int idx = keyCode;
   if (idx < 0 || idx > 110)
     return 0;
@@ -130,7 +134,7 @@ int16_t getCode()
   return layer0[idx];
 }
 
-void pressKey(byte key)
+void pressKey(uint8_t key)
 {
   for (int i = 0; i < 6; i++)
   {
@@ -147,7 +151,7 @@ void pressKey(byte key)
   }
 }
 
-void releaseKey(byte key)
+void releaseKey(uint8_t key)
 {
   for (int i = 0; i < 6; i++)
   {
@@ -168,9 +172,9 @@ void keyPressedController()
     return;
 
   if (code < 0)
-    modifiers |= (byte)(-code);
+    modifiers |= (uint8_t)(-code);
   else
-    pressKey((byte)code);
+    pressKey((uint8_t)code);
 
   hid.sendKeyPress(pressedKeys, modifiers);
 }
@@ -181,6 +185,7 @@ void keyPressedPeripheral()
   if (keyCode == 0)
     return;
 
+  // Send positive key code (encoded as int8_t) to signal key press
   Serial1.write((uint8_t)(int8_t)(keyCode)); // 1 to 127
 }
 
@@ -197,9 +202,9 @@ void keyReleasedController()
     return;
 
   if (code < 0)
-    modifiers &= ~((byte)(-code));
+    modifiers &= ~((uint8_t)(-code));
   else
-    releaseKey((byte)code);
+    releaseKey((uint8_t)code);
 
   hid.sendKeyPress(pressedKeys, modifiers);
 }
@@ -210,6 +215,7 @@ void keyReleasedPeripheral()
   if (keyCode == 0)
     return;
 
+  // Send negative key code (encoded as int8_t) to signal key release
   Serial1.write((uint8_t)(int8_t)(-keyCode)); // -1 to -127
 }
 
@@ -223,4 +229,13 @@ void loop()
 {
   usb.Task();
   digitalWrite(ledPin, usb.getUsbTaskState() == USB_STATE_RUNNING ? LED_ON : LED_OFF);
+
+  if (deviceRole == DeviceRole::CONTROLLER && Serial1.available() > 0)
+  {
+    int b = Serial1.read();
+    (void)b;
+
+    digitalWrite(ledPin, digitalRead(ledPin) == HIGH ? LOW : HIGH);
+    delay(200);
+  }
 }
