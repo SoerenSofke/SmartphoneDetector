@@ -7,3 +7,10 @@
 *.elf
 *.map
 *.uf2
+
+# ESP32-P4 secific files
+build.options.json
+flash_args
+partitions.csv
+sdkconfig
+
