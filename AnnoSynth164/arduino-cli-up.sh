@@ -12,3 +12,12 @@ curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.
 
 # search ESP32-P4 (Pico) boards: ESP32P4 Dev Module: esp32:esp32:esp32p4
 ./bin/arduino-cli board listall esp32:esp32:esp32p4
+
+# Compile ardunio scatch for ESP32-P4
+./bin/arduino-cli compile --output-dir . --fqbn esp32:esp32:esp32p4 Synth
+
+
+# Upload the compiled sketch to the ESP32-P4 via NixOS
+# nix-shell -p esptool tio
+#[nix-shell:/dev]$ esptool --chip esp32p4 --port /dev/ttyACM0 write-flash 0x0 /home/sofke/Downloads/Synth.ino.merged.bin
+#[nix-shell:/dev]$ tio /dev/ttyACM0
