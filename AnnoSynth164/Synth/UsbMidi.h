@@ -2,6 +2,8 @@
  * ESP32 USB MIDI Host Library (ESP32 USB MIDI Omocha)
  * Copyright (c) 2025 ndenki
  * https://github.com/enudenki/esp32-usb-host-midi-library.git
+ *
+ * Modified for ESP32-P4 compatibility
  */
 #ifndef USBMIDI_H
 #define USBMIDI_H
@@ -12,27 +14,30 @@
 #include <freertos/queue.h>
 #include <atomic>
 
-#define USB_MIDI_DEBUG 1
-#define MIDI_OUT_QUEUE_SIZE 128
+/* ── Target detection ───────────────────────────────────────────── */
+#if CONFIG_IDF_TARGET_ESP32P4
+  #define USB_MIDI_TARGET_P4  1
+#else
+  #define USB_MIDI_TARGET_P4  0
+#endif
 
+/* ── Tunables ───────────────────────────────────────────────────── */
+#define MIDI_OUT_QUEUE_SIZE 128
 #define NUM_MIDI_IN_TRANSFERS 2
 #define MAX_CLIENT_EVENT_MESSAGES 5
 #define USB_EVENT_POLL_TICKS 1
 #define USB_AUDIO_SUBCLASS_MIDI_STREAMING 3
 
-#if USB_MIDI_DEBUG
-#define USB_MIDI_LOG(format, ...)                 \
-    do {                                          \
-        if (this->_debugSerial) {                 \
-            this->_debugSerial->printf(format, ##__VA_ARGS__); \
-        }                                         \
-    } while (0)
-#else
-#define USB_MIDI_LOG(format, ...) \
-    do {                          \
-    } while (0)
-#endif
+/*
+ * Minimum descriptor length: A valid USB descriptor must have at
+ * least 2 bytes (bLength + bDescriptorType).  Interface descriptors
+ * are 9 bytes, endpoint descriptors are 7 bytes.
+ */
+#define USB_DESC_MIN_LENGTH          2
+#define USB_INTF_DESC_MIN_LENGTH     9
+#define USB_EP_DESC_MIN_LENGTH       7
 
+/* ── MIDI CIN codes ─────────────────────────────────────────────── */
 enum class MidiCin : uint8_t {
     NOTE_OFF = 0x08,
     NOTE_ON = 0x09,
@@ -40,12 +45,12 @@ enum class MidiCin : uint8_t {
     PROGRAM_CHANGE = 0x0C,
 };
 
+/* ── Class ──────────────────────────────────────────────────────── */
 class UsbMidi {
 public:
     using MidiMessageCallback = void (*)(const uint8_t (&)[4]);
-    
 
-    UsbMidi(Stream* debugSerial = nullptr);
+    UsbMidi();
     ~UsbMidi();
 
     void begin();
@@ -75,6 +80,7 @@ private:
     void _setupMidiEndpoints(const usb_ep_desc_t* endpoint);
     void _setupMidiInEndpoint(const usb_ep_desc_t* endpoint);
     void _setupMidiOutEndpoint(const usb_ep_desc_t* endpoint);
+    void _cancelInFlightTransfers();
     void _releaseDeviceResources();
     void _processMidiOutQueue();
 
@@ -84,13 +90,14 @@ private:
     usb_transfer_t* _midiInTransfers[NUM_MIDI_IN_TRANSFERS];
     QueueHandle_t _midiOutQueue;
     uint8_t _midiInterfaceNumber;
+    uint8_t _midiInEpAddr;
+    uint8_t _midiOutEpAddr;
     bool _isMidiInterfaceFound;
     bool _areEndpointsReady;
-    std::atomic<bool> _isMidiOutBusy; 
+    std::atomic<bool> _isMidiOutBusy;
     MidiMessageCallback _midiMessageCallback;
     void (*_deviceConnectedCallback)();
     void (*_deviceDisconnectedCallback)();
-    Stream* _debugSerial;
 };
 
 #endif // USBMIDI_H
