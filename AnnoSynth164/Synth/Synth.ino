@@ -10,12 +10,17 @@ void onDeviceConnect() {
     Serial.println("MIDI Device Connected");
 }
 
+void onDeviceDisconnected() {
+    Serial.println("MIDI Device Disconnected");
+}
+
 void setup() {
     Serial.begin(115200);
     delay(2000);        
 
     usbMidi.onMidiMessage(onMidiMessage);
     usbMidi.onDeviceConnected(onDeviceConnect);
+    usbMidi.onDeviceDisconnected(onDeviceDisconnected);
     usbMidi.begin();
 }
 
