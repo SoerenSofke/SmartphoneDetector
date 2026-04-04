@@ -20,4 +20,5 @@ curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.
 # Upload the compiled sketch to the ESP32-P4 via NixOS
 # nix-shell -p esptool tio
 #[nix-shell:/dev]$ esptool --chip esp32p4 --port /dev/ttyACM0 write-flash 0x0 /home/sofke/Downloads/Synth.ino.merged.bin
+#[nix-shell:/dev]$ esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0x0 /home/sofke/Downloads/Synth.ino.merged.bin
 #[nix-shell:/dev]$ tio /dev/ttyACM0

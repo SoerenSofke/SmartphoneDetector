@@ -6,6 +6,6 @@ void setup()
 
 void loop()
 {
-    Serial.println("Hello World vom ESP32-P4!");
+    Serial.println("Hello World vom ESP32!");
     delay(1000);
 }
