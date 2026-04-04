@@ -20,6 +20,7 @@ UsbMidi::UsbMidi()
       _areEndpointsReady(false),
       _isMidiOutBusy(false),
       _midiOutSubmitTime(0),
+      _deviceGonePending(false),
       _midiMessageCallback(nullptr),
       _deviceConnectedCallback(nullptr),
       _deviceDisconnectedCallback(nullptr),
@@ -110,6 +111,21 @@ void UsbMidi::update()
      */
     usb_host_lib_handle_events(USB_EVENT_POLL_TICKS, nullptr);
     usb_host_client_handle_events(_clientHandle, USB_EVENT_POLL_TICKS);
+
+    /*
+     * Deferred disconnect cleanup.  Now that all pending transfer
+     * callbacks have been dispatched (they returned early because
+     * _areEndpointsReady is already false), we can safely free
+     * resources outside the host library's dispatch context.
+     */
+    if (_deviceGonePending) {
+        _deviceGonePending = false;
+        _releaseDeviceResources(true);  /* device is physically gone */
+        if (_deviceDisconnectedCallback) {
+            _deviceDisconnectedCallback();
+        }
+        return;   /* skip further work this cycle – device is gone */
+    }
 
     /*
      * Re-submit IN transfers that were deferred from the callback.
@@ -251,10 +267,16 @@ void UsbMidi::_handleClientEvent(const usb_host_client_event_msg_t* eventMsg)
 
         case USB_HOST_CLIENT_EVENT_DEV_GONE:
             if (eventMsg->dev_gone.dev_hdl == _deviceHandle) {
-                _releaseDeviceResources();
-                if (_deviceDisconnectedCallback) {
-                    _deviceDisconnectedCallback();
-                }
+                /*
+                 * Only mark the device as gone here.  Heavy cleanup
+                 * (halt / flush / free / close) is unsafe inside the
+                 * usb_host_client_handle_events dispatch because the
+                 * host library is still iterating its internal URB
+                 * lists.  Actual cleanup happens in update().
+                 */
+                _areEndpointsReady.store(false, std::memory_order_release);
+                _isMidiOutBusy.store(false, std::memory_order_release);
+                _deviceGonePending = true;
             }
             break;
 
@@ -451,11 +473,25 @@ void UsbMidi::_handleMidiTransfer(usb_transfer_t* transfer)
             }
         } else {
             _isMidiOutBusy.store(false, std::memory_order_release);
-            _processMidiOutQueue();
         }
     } else if (transfer->status != USB_TRANSFER_STATUS_CANCELED) {
+        /*
+         * USB_TRANSFER_STATUS_NO_DEVICE means the device has been
+         * physically disconnected.  DEV_GONE may arrive in the SAME
+         * usb_host_client_handle_events call, or one cycle LATER.
+         * In the latter case _areEndpointsReady would still be true
+         * when _resubmitPendingInTransfers runs, causing a submit to
+         * an INVALID pipe.  Prevent this by immediately disabling
+         * endpoints — DEV_GONE will handle the rest.
+         */
+        if (transfer->status == USB_TRANSFER_STATUS_NO_DEVICE) {
+            _areEndpointsReady.store(false, std::memory_order_release);
+            _isMidiOutBusy.store(false, std::memory_order_release);
+            return;
+        }
+
         if (isInTransfer) {
-            /* Re-submit only if error count is within limit */
+            /* Transient error — re-submit only if error count is within limit */
             int idx = -1;
             for (int i = 0; i < NUM_MIDI_IN_TRANSFERS; ++i) {
                 if (_midiInTransfers[i] == transfer) { idx = i; break; }
@@ -573,14 +609,16 @@ void UsbMidi::_cancelInFlightTransfers()
     if (_midiInEpAddr != 0) {
         usb_host_endpoint_halt(_deviceHandle, _midiInEpAddr);
         usb_host_endpoint_flush(_deviceHandle, _midiInEpAddr);
+        usb_host_endpoint_clear(_deviceHandle, _midiInEpAddr);
     }
     if (_midiOutEpAddr != 0) {
         usb_host_endpoint_halt(_deviceHandle, _midiOutEpAddr);
         usb_host_endpoint_flush(_deviceHandle, _midiOutEpAddr);
+        usb_host_endpoint_clear(_deviceHandle, _midiOutEpAddr);
     }
 }
 
-void UsbMidi::_releaseDeviceResources()
+void UsbMidi::_releaseDeviceResources(bool deviceGone)
 {
     if (!_deviceHandle) return;
 
@@ -591,7 +629,17 @@ void UsbMidi::_releaseDeviceResources()
         xQueueReset(_midiOutQueue);
     }
 
-    _cancelInFlightTransfers();
+    /*
+     * Only attempt endpoint halt/flush/clear when the device is still
+     * physically present (e.g. destructor, normal close).  When
+     * DEV_GONE has fired the host library has already moved all pipes
+     * to HCD_PIPE_STATE_INVALID and returned all URBs — endpoint
+     * commands would fail with ESP_ERR_INVALID_STATE and leave the
+     * host library's internal bookkeeping inconsistent.
+     */
+    if (!deviceGone) {
+        _cancelInFlightTransfers();
+    }
 
     for (int i = 0; i < NUM_MIDI_IN_TRANSFERS; ++i) {
         if (_midiInTransfers[i]) {

@@ -87,7 +87,7 @@ private:
     void _setupMidiInEndpoint(const usb_ep_desc_t* endpoint);
     void _setupMidiOutEndpoint(const usb_ep_desc_t* endpoint);
     void _cancelInFlightTransfers();
-    void _releaseDeviceResources();
+    void _releaseDeviceResources(bool deviceGone = false);
     void _processMidiOutQueue();
     void _checkOutTransferTimeout();
     void _resubmitPendingInTransfers();
@@ -111,6 +111,9 @@ private:
 
     /* Deferred IN-transfer re-submission flags (per transfer slot) */
     bool _pendingInResubmit[NUM_MIDI_IN_TRANSFERS];
+
+    /* Deferred disconnect – set in callback, acted on in update() */
+    bool _deviceGonePending;
 
     /* OUT-transfer timeout tracking */
     uint32_t _midiOutSubmitTime;
