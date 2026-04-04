@@ -19,32 +19,50 @@ UsbMidi::UsbMidi()
       _isMidiInterfaceFound(false),
       _areEndpointsReady(false),
       _isMidiOutBusy(false),
+      _midiOutSubmitTime(0),
       _midiMessageCallback(nullptr),
       _deviceConnectedCallback(nullptr),
-      _deviceDisconnectedCallback(nullptr)
+      _deviceDisconnectedCallback(nullptr),
+      _isHostInstalled(false)
 {
     for (int i = 0; i < NUM_MIDI_IN_TRANSFERS; ++i) {
         _midiInTransfers[i] = nullptr;
+        _midiInErrorCount[i] = 0;
+        _pendingInResubmit[i] = false;
     }
 }
 
 UsbMidi::~UsbMidi()
 {
     _releaseDeviceResources();
+
     if (_clientHandle) {
         usb_host_client_deregister(_clientHandle);
+        _clientHandle = nullptr;
     }
-    usb_host_uninstall();
+
+    if (_isHostInstalled) {
+        /* Drain pending library events before uninstall */
+        uint32_t eventFlags = 0;
+        for (int i = 0; i < 10; ++i) {
+            usb_host_lib_handle_events(USB_EVENT_POLL_TICKS, &eventFlags);
+            if (eventFlags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) break;
+        }
+        usb_host_uninstall();
+        _isHostInstalled = false;
+    }
+
     if (_midiOutQueue) {
         vQueueDelete(_midiOutQueue);
+        _midiOutQueue = nullptr;
     }
 }
 
-void UsbMidi::begin()
+bool UsbMidi::begin()
 {
     _midiOutQueue = xQueueCreate(MIDI_OUT_QUEUE_SIZE, sizeof(uint8_t[4]));
     if (!_midiOutQueue) {
-        return;
+        return false;
     }
 
     const usb_host_config_t hostConfig = {
@@ -55,8 +73,11 @@ void UsbMidi::begin()
         .intr_flags = ESP_INTR_FLAG_LEVEL1,
     };
     if (usb_host_install(&hostConfig) != ESP_OK) {
-        return;
+        vQueueDelete(_midiOutQueue);
+        _midiOutQueue = nullptr;
+        return false;
     }
+    _isHostInstalled = true;
 
     const usb_host_client_config_t clientConfig = {
         .is_synchronous = false,
@@ -64,16 +85,41 @@ void UsbMidi::begin()
         .async = { .client_event_callback = _clientEventCallback, .callback_arg = this }
     };
     if (usb_host_client_register(&clientConfig, &_clientHandle) != ESP_OK) {
-        return;
+        usb_host_uninstall();
+        _isHostInstalled = false;
+        vQueueDelete(_midiOutQueue);
+        _midiOutQueue = nullptr;
+        return false;
     }
+
+    return true;
 }
 
 void UsbMidi::update()
 {
     if (!_clientHandle) return;
 
-    usb_host_client_handle_events(_clientHandle, USB_EVENT_POLL_TICKS);
+    /*
+     * Process library-level events FIRST.  This is where port-level
+     * disconnect detection generates the DEV_GONE event and enqueues
+     * it to the client event queue.  By doing this before client
+     * events, a transfer completion and the resulting DEV_GONE are
+     * both available to usb_host_client_handle_events in the same
+     * pass — the disconnect callback runs before we attempt any
+     * re-submission.
+     */
     usb_host_lib_handle_events(USB_EVENT_POLL_TICKS, nullptr);
+    usb_host_client_handle_events(_clientHandle, USB_EVENT_POLL_TICKS);
+
+    /*
+     * Re-submit IN transfers that were deferred from the callback.
+     * Because DEV_GONE was processed above (same cycle), the
+     * _areEndpointsReady flag is already false when the device is
+     * gone — the re-submit is skipped cleanly.
+     */
+    _resubmitPendingInTransfers();
+
+    _checkOutTransferTimeout();
     _processMidiOutQueue();
 }
 
@@ -105,25 +151,45 @@ bool UsbMidi::sendMidiMessage(const uint8_t* message, uint8_t size)
 
 bool UsbMidi::noteOn(uint8_t channel, uint8_t note, uint8_t velocity)
 {
-    uint8_t message[4] = { (uint8_t)MidiCin::NOTE_ON, (uint8_t)(0x90 | (channel & 0x0F)), (uint8_t)(note & 0x7F), (uint8_t)(velocity & 0x7F) };
+    uint8_t message[4] = {
+        (uint8_t)MidiCin::NOTE_ON,
+        (uint8_t)(0x90 | (channel & 0x0F)),
+        (uint8_t)(note & 0x7F),
+        (uint8_t)(velocity & 0x7F)
+    };
     return sendMidiMessage(message, 4);
 }
 
 bool UsbMidi::noteOff(uint8_t channel, uint8_t note, uint8_t velocity)
 {
-    uint8_t message[4] = { (uint8_t)MidiCin::NOTE_OFF, (uint8_t)(0x80 | (channel & 0x0F)), (uint8_t)(note & 0x7F), (uint8_t)(velocity & 0x7F) };
+    uint8_t message[4] = {
+        (uint8_t)MidiCin::NOTE_OFF,
+        (uint8_t)(0x80 | (channel & 0x0F)),
+        (uint8_t)(note & 0x7F),
+        (uint8_t)(velocity & 0x7F)
+    };
     return sendMidiMessage(message, 4);
 }
 
 bool UsbMidi::controlChange(uint8_t channel, uint8_t controller, uint8_t value)
 {
-    uint8_t message[4] = { (uint8_t)MidiCin::CONTROL_CHANGE, (uint8_t)(0xB0 | (channel & 0x0F)), (uint8_t)(controller & 0x7F), (uint8_t)(value & 0x7F) };
+    uint8_t message[4] = {
+        (uint8_t)MidiCin::CONTROL_CHANGE,
+        (uint8_t)(0xB0 | (channel & 0x0F)),
+        (uint8_t)(controller & 0x7F),
+        (uint8_t)(value & 0x7F)
+    };
     return sendMidiMessage(message, 4);
 }
 
 bool UsbMidi::programChange(uint8_t channel, uint8_t program)
 {
-    uint8_t message[4] = { (uint8_t)MidiCin::PROGRAM_CHANGE, (uint8_t)(0xC0 | (channel & 0x0F)), (uint8_t)(program & 0x7F), 0 };
+    uint8_t message[4] = {
+        (uint8_t)MidiCin::PROGRAM_CHANGE,
+        (uint8_t)(0xC0 | (channel & 0x0F)),
+        (uint8_t)(program & 0x7F),
+        0
+    };
     return sendMidiMessage(message, 4);
 }
 
@@ -173,7 +239,10 @@ void UsbMidi::_handleClientEvent(const usb_host_client_event_msg_t* eventMsg)
                 err = usb_host_get_active_config_descriptor(_deviceHandle, &configDesc);
                 if (err == ESP_OK) {
                     _parseConfigDescriptor(configDesc);
-                } else {
+                }
+
+                /* Close device if no usable MIDI interface was found */
+                if (!_isMidiInterfaceFound) {
                     usb_host_device_close(_clientHandle, _deviceHandle);
                     _deviceHandle = nullptr;
                 }
@@ -198,11 +267,24 @@ void UsbMidi::_handleClientEvent(const usb_host_client_event_msg_t* eventMsg)
 
 void UsbMidi::_parseConfigDescriptor(const usb_config_desc_t* configDesc)
 {
-    const uint8_t* p = &configDesc->val[0];
-    const uint8_t* end = p + configDesc->wTotalLength;
+    /*
+     * Use portable pointer arithmetic rather than accessing the
+     * val[] member, whose layout varies across ESP-IDF versions
+     * (union at offset 0 vs. flexible array at end of struct).
+     */
+    const uint8_t* start = reinterpret_cast<const uint8_t*>(configDesc);
+    const uint8_t* end   = start + configDesc->wTotalLength;
+    const uint8_t* p     = start + configDesc->bLength; /* skip config header */
+
+    /*
+     * Track whether we are currently inside the MIDI interface's
+     * descriptor block.  A new interface descriptor always ends the
+     * previous interface's endpoint zone.
+     */
+    bool inMidiInterface = false;
+
     while (p < end) {
         const uint8_t bLength = p[0];
-
         if (bLength < USB_DESC_MIN_LENGTH || (p + bLength) > end) break;
 
         const uint8_t bDescriptorType = p[1];
@@ -211,14 +293,20 @@ void UsbMidi::_parseConfigDescriptor(const usb_config_desc_t* configDesc)
                 if (bLength < USB_INTF_DESC_MIN_LENGTH) break;
                 if (!_isMidiInterfaceFound) {
                     _findAndClaimMidiInterface(reinterpret_cast<const usb_intf_desc_t*>(p));
+                    inMidiInterface = _isMidiInterfaceFound;
+                } else {
+                    /* New interface descriptor → no longer in MIDI zone */
+                    inMidiInterface = false;
                 }
                 break;
+
             case USB_B_DESCRIPTOR_TYPE_ENDPOINT:
                 if (bLength < USB_EP_DESC_MIN_LENGTH) break;
-                if (_isMidiInterfaceFound && !_areEndpointsReady) {
+                if (inMidiInterface && !_areEndpointsReady.load(std::memory_order_relaxed)) {
                     _setupMidiEndpoints(reinterpret_cast<const usb_ep_desc_t*>(p));
                 }
                 break;
+
             default:
                 break;
         }
@@ -228,8 +316,12 @@ void UsbMidi::_parseConfigDescriptor(const usb_config_desc_t* configDesc)
 
 void UsbMidi::_findAndClaimMidiInterface(const usb_intf_desc_t* intf)
 {
-    if (intf->bInterfaceClass == USB_CLASS_AUDIO && intf->bInterfaceSubClass == USB_AUDIO_SUBCLASS_MIDI_STREAMING) {
-        esp_err_t err = usb_host_interface_claim(_clientHandle, _deviceHandle, intf->bInterfaceNumber, intf->bAlternateSetting);
+    if (intf->bInterfaceClass    == USB_CLASS_AUDIO &&
+        intf->bInterfaceSubClass == USB_AUDIO_SUBCLASS_MIDI_STREAMING)
+    {
+        esp_err_t err = usb_host_interface_claim(
+            _clientHandle, _deviceHandle,
+            intf->bInterfaceNumber, intf->bAlternateSetting);
 
         if (err == ESP_OK) {
             _midiInterfaceNumber = intf->bInterfaceNumber;
@@ -244,7 +336,10 @@ void UsbMidi::_findAndClaimMidiInterface(const usb_intf_desc_t* intf)
 
 void UsbMidi::_setupMidiEndpoints(const usb_ep_desc_t* endpoint)
 {
-    if ((endpoint->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK) != USB_BM_ATTRIBUTES_XFER_BULK) return;
+    if ((endpoint->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK)
+        != USB_BM_ATTRIBUTES_XFER_BULK) {
+        return;
+    }
 
     if (endpoint->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK) {
         _setupMidiInEndpoint(endpoint);
@@ -252,8 +347,10 @@ void UsbMidi::_setupMidiEndpoints(const usb_ep_desc_t* endpoint)
         _setupMidiOutEndpoint(endpoint);
     }
 
-    if (!_areEndpointsReady && _midiOutTransfer && _midiInTransfers[0]) {
-        _areEndpointsReady = true;
+    if (!_areEndpointsReady.load(std::memory_order_relaxed)
+        && _midiOutTransfer && _midiInTransfers[0])
+    {
+        _areEndpointsReady.store(true, std::memory_order_release);
         if (_deviceConnectedCallback) _deviceConnectedCallback();
     }
 }
@@ -265,13 +362,14 @@ void UsbMidi::_setupMidiInEndpoint(const usb_ep_desc_t* endpoint)
 
         esp_err_t err = usb_host_transfer_alloc(endpoint->wMaxPacketSize, 0, &_midiInTransfers[i]);
         if (err == ESP_OK) {
-            _midiInTransfers[i]->device_handle = _deviceHandle;
-            _midiInTransfers[i]->bEndpointAddress = endpoint->bEndpointAddress;
-            _midiInTransfers[i]->callback = _midiTransferCallback;
-            _midiInTransfers[i]->context = this;
-            _midiInTransfers[i]->num_bytes = endpoint->wMaxPacketSize;
+            _midiInTransfers[i]->device_handle    = _deviceHandle;
+            _midiInTransfers[i]->bEndpointAddress  = endpoint->bEndpointAddress;
+            _midiInTransfers[i]->callback          = _midiTransferCallback;
+            _midiInTransfers[i]->context           = this;
+            _midiInTransfers[i]->num_bytes         = endpoint->wMaxPacketSize;
 
             _midiInEpAddr = endpoint->bEndpointAddress;
+            _midiInErrorCount[i] = 0;
 
             err = usb_host_transfer_submit(_midiInTransfers[i]);
             if (err != ESP_OK) {
@@ -290,10 +388,10 @@ void UsbMidi::_setupMidiOutEndpoint(const usb_ep_desc_t* endpoint)
 
     esp_err_t err = usb_host_transfer_alloc(endpoint->wMaxPacketSize, 0, &_midiOutTransfer);
     if (err == ESP_OK) {
-        _midiOutTransfer->device_handle = _deviceHandle;
+        _midiOutTransfer->device_handle   = _deviceHandle;
         _midiOutTransfer->bEndpointAddress = endpoint->bEndpointAddress;
-        _midiOutTransfer->callback = _midiTransferCallback;
-        _midiOutTransfer->context = this;
+        _midiOutTransfer->callback         = _midiTransferCallback;
+        _midiOutTransfer->context          = this;
 
         _midiOutEpAddr = endpoint->bEndpointAddress;
     } else {
@@ -312,7 +410,9 @@ void UsbMidi::_midiTransferCallback(usb_transfer_t* transfer)
 
 void UsbMidi::_handleMidiTransfer(usb_transfer_t* transfer)
 {
-    if (!_areEndpointsReady || _deviceHandle != transfer->device_handle) {
+    if (!_areEndpointsReady.load(std::memory_order_acquire)
+        || _deviceHandle != transfer->device_handle)
+    {
         return;
     }
 
@@ -320,6 +420,16 @@ void UsbMidi::_handleMidiTransfer(usb_transfer_t* transfer)
 
     if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
         if (isInTransfer) {
+            /* Find transfer slot index */
+            int idx = -1;
+            for (int i = 0; i < NUM_MIDI_IN_TRANSFERS; ++i) {
+                if (_midiInTransfers[i] == transfer) { idx = i; break; }
+            }
+
+            if (idx >= 0) {
+                _midiInErrorCount[idx] = 0;
+            }
+
             int validBytes = transfer->actual_num_bytes & ~3;
             for (int i = 0; i < validBytes; i += 4) {
                 uint8_t* const p = &transfer->data_buffer[i];
@@ -329,14 +439,32 @@ void UsbMidi::_handleMidiTransfer(usb_transfer_t* transfer)
                     _midiMessageCallback(*reinterpret_cast<const uint8_t (*)[4]>(p));
                 }
             }
-            usb_host_transfer_submit(transfer);
+
+            /*
+             * Defer re-submission to update().  This ensures that a
+             * DEV_GONE event arriving in the same event batch is
+             * processed first, preventing usb_host_transfer_submit
+             * from being called on a disconnected device.
+             */
+            if (idx >= 0) {
+                _pendingInResubmit[idx] = true;
+            }
         } else {
             _isMidiOutBusy.store(false, std::memory_order_release);
             _processMidiOutQueue();
         }
     } else if (transfer->status != USB_TRANSFER_STATUS_CANCELED) {
         if (isInTransfer) {
-            usb_host_transfer_submit(transfer);
+            /* Re-submit only if error count is within limit */
+            int idx = -1;
+            for (int i = 0; i < NUM_MIDI_IN_TRANSFERS; ++i) {
+                if (_midiInTransfers[i] == transfer) { idx = i; break; }
+            }
+            if (idx >= 0 && _midiInErrorCount[idx] < MIDI_IN_MAX_ERROR_COUNT) {
+                _midiInErrorCount[idx]++;
+                _pendingInResubmit[idx] = true;
+            }
+            /* else: give up re-submitting this transfer */
         } else {
             _isMidiOutBusy.store(false, std::memory_order_release);
         }
@@ -347,7 +475,9 @@ void UsbMidi::_handleMidiTransfer(usb_transfer_t* transfer)
 
 void UsbMidi::_processMidiOutQueue()
 {
-    if (!_areEndpointsReady || !_midiOutTransfer) {
+    if (!_areEndpointsReady.load(std::memory_order_acquire)
+        || !_midiOutTransfer || !_midiOutQueue)
+    {
         return;
     }
 
@@ -378,11 +508,59 @@ void UsbMidi::_processMidiOutQueue()
 
     if (bytesToSend > 0) {
         _midiOutTransfer->num_bytes = bytesToSend;
-        if (usb_host_transfer_submit(_midiOutTransfer) != ESP_OK) {
+        if (usb_host_transfer_submit(_midiOutTransfer) == ESP_OK) {
+            _midiOutSubmitTime = (uint32_t)millis();
+        } else {
             _isMidiOutBusy.store(false, std::memory_order_release);
         }
     } else {
         _isMidiOutBusy.store(false, std::memory_order_release);
+    }
+}
+
+/* ── OUT transfer timeout watchdog ──────────────────────────────── */
+
+void UsbMidi::_checkOutTransferTimeout()
+{
+    if (!_isMidiOutBusy.load(std::memory_order_acquire)) return;
+    if (!_midiOutTransfer) return;
+
+    uint32_t elapsed = (uint32_t)millis() - _midiOutSubmitTime;
+    if (elapsed >= MIDI_OUT_TIMEOUT_MS) {
+        /*
+         * The OUT transfer appears stuck.  Halt and flush the
+         * endpoint, then release the busy flag so the queue can
+         * resume on the next cycle.
+         */
+        if (_midiOutEpAddr != 0 && _deviceHandle) {
+            usb_host_endpoint_halt(_deviceHandle, _midiOutEpAddr);
+            usb_host_endpoint_flush(_deviceHandle, _midiOutEpAddr);
+            usb_host_endpoint_clear(_deviceHandle, _midiOutEpAddr);
+        }
+        _isMidiOutBusy.store(false, std::memory_order_release);
+    }
+}
+
+/* ── Deferred IN transfer re-submission ─────────────────────────── */
+
+void UsbMidi::_resubmitPendingInTransfers()
+{
+    if (!_areEndpointsReady.load(std::memory_order_acquire)) {
+        /* Device disconnected — clear all pending flags, do not submit */
+        for (int i = 0; i < NUM_MIDI_IN_TRANSFERS; ++i) {
+            _pendingInResubmit[i] = false;
+        }
+        return;
+    }
+
+    for (int i = 0; i < NUM_MIDI_IN_TRANSFERS; ++i) {
+        if (!_pendingInResubmit[i] || !_midiInTransfers[i]) continue;
+        _pendingInResubmit[i] = false;
+
+        if (usb_host_transfer_submit(_midiInTransfers[i]) != ESP_OK) {
+            _areEndpointsReady.store(false, std::memory_order_release);
+            return;
+        }
     }
 }
 
@@ -406,7 +584,7 @@ void UsbMidi::_releaseDeviceResources()
 {
     if (!_deviceHandle) return;
 
-    _areEndpointsReady = false;
+    _areEndpointsReady.store(false, std::memory_order_release);
     _isMidiOutBusy.store(false, std::memory_order_release);
 
     if (_midiOutQueue) {
@@ -420,6 +598,8 @@ void UsbMidi::_releaseDeviceResources()
             usb_host_transfer_free(_midiInTransfers[i]);
             _midiInTransfers[i] = nullptr;
         }
+        _midiInErrorCount[i] = 0;
+        _pendingInResubmit[i] = false;
     }
     if (_midiOutTransfer) {
         usb_host_transfer_free(_midiOutTransfer);
@@ -435,4 +615,5 @@ void UsbMidi::_releaseDeviceResources()
     _isMidiInterfaceFound = false;
     _midiInEpAddr = 0;
     _midiOutEpAddr = 0;
+    _midiOutSubmitTime = 0;
 }

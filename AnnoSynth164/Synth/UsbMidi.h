@@ -3,7 +3,7 @@
  * Copyright (c) 2025 ndenki
  * https://github.com/enudenki/esp32-usb-host-midi-library.git
  *
- * Modified for ESP32-P4 compatibility
+ * Modified for ESP32-P4 compatibility, robustness, and performance.
  */
 #ifndef USBMIDI_H
 #define USBMIDI_H
@@ -22,11 +22,17 @@
 #endif
 
 /* ── Tunables ───────────────────────────────────────────────────── */
-#define MIDI_OUT_QUEUE_SIZE 128
-#define NUM_MIDI_IN_TRANSFERS 2
-#define MAX_CLIENT_EVENT_MESSAGES 5
-#define USB_EVENT_POLL_TICKS 1
+#define MIDI_OUT_QUEUE_SIZE          128
+#define NUM_MIDI_IN_TRANSFERS        2
+#define MAX_CLIENT_EVENT_MESSAGES    5
+#define USB_EVENT_POLL_TICKS         1
 #define USB_AUDIO_SUBCLASS_MIDI_STREAMING 3
+
+/* Maximum consecutive IN-transfer errors before giving up re-submit */
+#define MIDI_IN_MAX_ERROR_COUNT      10
+
+/* OUT-transfer timeout in milliseconds */
+#define MIDI_OUT_TIMEOUT_MS          1000
 
 /*
  * Minimum descriptor length: A valid USB descriptor must have at
@@ -39,10 +45,10 @@
 
 /* ── MIDI CIN codes ─────────────────────────────────────────────── */
 enum class MidiCin : uint8_t {
-    NOTE_OFF = 0x08,
-    NOTE_ON = 0x09,
-    CONTROL_CHANGE = 0x0B,
-    PROGRAM_CHANGE = 0x0C,
+    NOTE_OFF        = 0x08,
+    NOTE_ON         = 0x09,
+    CONTROL_CHANGE  = 0x0B,
+    PROGRAM_CHANGE  = 0x0C,
 };
 
 /* ── Class ──────────────────────────────────────────────────────── */
@@ -53,7 +59,7 @@ public:
     UsbMidi();
     ~UsbMidi();
 
-    void begin();
+    bool begin();
     void update();
 
     void onMidiMessage(MidiMessageCallback callback);
@@ -83,21 +89,38 @@ private:
     void _cancelInFlightTransfers();
     void _releaseDeviceResources();
     void _processMidiOutQueue();
+    void _checkOutTransferTimeout();
+    void _resubmitPendingInTransfers();
 
     usb_host_client_handle_t _clientHandle;
-    usb_device_handle_t _deviceHandle;
-    usb_transfer_t* _midiOutTransfer;
-    usb_transfer_t* _midiInTransfers[NUM_MIDI_IN_TRANSFERS];
-    QueueHandle_t _midiOutQueue;
+    usb_device_handle_t      _deviceHandle;
+    usb_transfer_t*          _midiOutTransfer;
+    usb_transfer_t*          _midiInTransfers[NUM_MIDI_IN_TRANSFERS];
+    QueueHandle_t            _midiOutQueue;
+
     uint8_t _midiInterfaceNumber;
     uint8_t _midiInEpAddr;
     uint8_t _midiOutEpAddr;
-    bool _isMidiInterfaceFound;
-    bool _areEndpointsReady;
-    std::atomic<bool> _isMidiOutBusy;
-    MidiMessageCallback _midiMessageCallback;
+
+    bool                _isMidiInterfaceFound;
+    std::atomic<bool>   _areEndpointsReady;
+    std::atomic<bool>   _isMidiOutBusy;
+
+    /* IN-transfer error tracking (per transfer slot) */
+    uint8_t _midiInErrorCount[NUM_MIDI_IN_TRANSFERS];
+
+    /* Deferred IN-transfer re-submission flags (per transfer slot) */
+    bool _pendingInResubmit[NUM_MIDI_IN_TRANSFERS];
+
+    /* OUT-transfer timeout tracking */
+    uint32_t _midiOutSubmitTime;
+
+    /* Callbacks – set before begin() or from the same task as update() */
+    MidiMessageCallback  _midiMessageCallback;
     void (*_deviceConnectedCallback)();
     void (*_deviceDisconnectedCallback)();
+
+    bool _isHostInstalled;
 };
 
 #endif // USBMIDI_H
