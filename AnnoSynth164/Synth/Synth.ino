@@ -1,3 +1,4 @@
+#include <freertos/queue.h>
 #include <ESP_I2S.h>
 #include <math.h>
 #include "UsbMidi.h"
@@ -24,6 +25,10 @@ namespace Config
 }
 
 // ── Global state ───────────────────────────────────────────
+
+static QueueHandle_t trigger_queue = nullptr;
+constexpr size_t QUEUE_LENGTH = 16;
+
 static I2SClass i2s;
 static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
 
@@ -41,11 +46,14 @@ static uint16_t counter = 0;
 static size_t fill_audio_block(int16_t *buf, uint16_t frames)
 {
     for (uint16_t i = 0; i < frames; ++i)
-    {        
-        const int16_t sample = pdr_decode(&d, kick_3, counter == 0);
+    {
+        bool trigger = false;
+        xQueueReceive(trigger_queue, &trigger, 0);
+
+        const int16_t sample = pdr_decode(&d, kick_3, trigger);
         buf[i * 2] = sample;     // left
         buf[i * 2 + 1] = sample; // right
-                
+
         counter = (counter + 1) % Config::SAMPLE_RATE;
     }
 
@@ -79,6 +87,9 @@ void tsprint(const char *msg)
 void onMidiMessage(const uint8_t (&data)[4])
 {
     tsprint("MIDI Message Received");
+
+    bool trigger = true;
+    xQueueSendToBack(trigger_queue, &trigger, 0);
 }
 
 void onDeviceConnect()
@@ -97,6 +108,8 @@ void setup()
 {
     Serial.begin(115200);
     delay(2000);
+
+    trigger_queue = xQueueCreate(QUEUE_LENGTH, sizeof(bool));
 
     if (!init_i2s())
     {
