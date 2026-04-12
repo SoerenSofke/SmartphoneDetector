@@ -12,7 +12,7 @@ namespace Config
     constexpr size_t QUEUE_LENGTH = 16;
 
     // Audio parameters
-    constexpr uint32_t SAMPLE_RATE = 44100;    
+    constexpr uint32_t SAMPLE_RATE = 48000;    
     constexpr uint16_t FRAMES_PER_BLOCK = 128;
 
     // I2S pin assignment (adjust to your board)
@@ -82,11 +82,17 @@ void tsprint(const char *msg)
 // ── MIDI callbacks ───────────────────────────────────
 
 void onMidiMessage(const uint8_t (&data)[4])
-{
-    tsprint("MIDI Message Received");
+{    
+    uint8_t status   = data[1] & 0xF0;
+    uint8_t velocity = data[3];
 
-    bool trigger = true;
-    xQueueSendToBack(trigger_queue, &trigger, 0);
+    if (status == 0x90 && velocity > 0)
+    {
+        bool trigger = true;
+        xQueueSendToBack(trigger_queue, &trigger, 0);
+    }
+
+    tsprint("MIDI Message Received");
 }
 
 void onDeviceConnect()
