@@ -2,6 +2,9 @@
 #include <math.h>
 #include "UsbMidi.h"
 
+#include "pdr.h"
+#include "kick_3.h"
+
 // ── Configuration ──────────────────────────────────────────
 namespace Config
 {
@@ -17,18 +20,17 @@ namespace Config
     constexpr int8_t PIN_DOUT = 7;
 
     // Derived constants (computed at compile time)
-    constexpr float PHASE_INC = 2.0f * M_PI * TONE_HZ / SAMPLE_RATE;
-    constexpr int16_t AMPLITUDE_I16 = static_cast<int16_t>(AMPLITUDE * 32767.0f);
     constexpr size_t SAMPLES_PER_BLOCK = FRAMES_PER_BLOCK * 2; // stereo
-    constexpr size_t BUFFER_BYTES = SAMPLES_PER_BLOCK * sizeof(int16_t);
 }
 
 // ── Global state ───────────────────────────────────────────
 static I2SClass i2s;
-static float phase = 0.0f;
 static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
 
 static UsbMidi usbMidi;
+
+static pdr_t d = {0};
+static uint16_t counter = 0;
 
 // ── Helper functions ───────────────────────────────────────
 
@@ -36,22 +38,16 @@ static UsbMidi usbMidi;
 /// @param buf    destination buffer (stereo, interleaved L/R)
 /// @param frames number of stereo frames to generate
 /// @return       number of bytes written to the buffer
-static size_t fill_sine_block(int16_t *buf, uint16_t frames)
+static size_t fill_audio_block(int16_t *buf, uint16_t frames)
 {
     for (uint16_t i = 0; i < frames; ++i)
-    {
-        const int16_t sample =
-            static_cast<int16_t>(sinf(phase) * Config::AMPLITUDE_I16);
-
+    {        
+        const int16_t sample = pdr_decode(&d, kick_3, counter == 0);
         buf[i * 2] = sample;     // left
         buf[i * 2 + 1] = sample; // right
-
-        phase += Config::PHASE_INC;
+                
+        counter = (counter + 1) % Config::SAMPLE_RATE;
     }
-
-    // Keep phase within [0, 2π) to prevent
-    // precision loss during long runtime
-    phase = fmodf(phase, 2.0f * M_PI);
 
     return static_cast<size_t>(frames) * 2 * sizeof(int16_t);
 }
@@ -120,7 +116,7 @@ void setup()
 
 void loop()
 {
-    const size_t bytes = fill_sine_block(audio_buffer, Config::FRAMES_PER_BLOCK);
+    const size_t bytes = fill_audio_block(audio_buffer, Config::FRAMES_PER_BLOCK);
     const size_t written = i2s.write(reinterpret_cast<uint8_t *>(audio_buffer), bytes);
 
     usbMidi.update();
