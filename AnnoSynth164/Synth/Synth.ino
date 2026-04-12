@@ -1,6 +1,5 @@
 #include <freertos/queue.h>
 #include <ESP_I2S.h>
-#include <math.h>
 #include "UsbMidi.h"
 
 #include "pdr.h"
@@ -9,10 +8,11 @@
 // ── Configuration ──────────────────────────────────────────
 namespace Config
 {
+    // Queue parameters
+    constexpr size_t QUEUE_LENGTH = 16;
+
     // Audio parameters
-    constexpr uint32_t SAMPLE_RATE = 44100;
-    constexpr float TONE_HZ = 440.0f;
-    constexpr float AMPLITUDE = 0.5f; // 0.0 – 1.0
+    constexpr uint32_t SAMPLE_RATE = 44100;    
     constexpr uint16_t FRAMES_PER_BLOCK = 128;
 
     // I2S pin assignment (adjust to your board)
@@ -27,19 +27,18 @@ namespace Config
 // ── Global state ───────────────────────────────────────────
 
 static QueueHandle_t trigger_queue = nullptr;
-constexpr size_t QUEUE_LENGTH = 16;
 
 static I2SClass i2s;
 static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
 
 static UsbMidi usbMidi;
 
-static pdr_t d = {0};
-static uint16_t counter = 0;
+static pdr_t pdr_state = {0};
+
 
 // ── Helper functions ───────────────────────────────────────
 
-/// Fills the audio buffer with a sine tone.
+/// Fills the audio buffer.
 /// @param buf    destination buffer (stereo, interleaved L/R)
 /// @param frames number of stereo frames to generate
 /// @return       number of bytes written to the buffer
@@ -50,11 +49,9 @@ static size_t fill_audio_block(int16_t *buf, uint16_t frames)
         bool trigger = false;
         xQueueReceive(trigger_queue, &trigger, 0);
 
-        const int16_t sample = pdr_decode(&d, kick_3, trigger);
+        const int16_t sample = pdr_decode(&pdr_state, kick_3, trigger);
         buf[i * 2] = sample;     // left
         buf[i * 2 + 1] = sample; // right
-
-        counter = (counter + 1) % Config::SAMPLE_RATE;
     }
 
     return static_cast<size_t>(frames) * 2 * sizeof(int16_t);
@@ -109,7 +106,7 @@ void setup()
     Serial.begin(115200);
     delay(2000);
 
-    trigger_queue = xQueueCreate(QUEUE_LENGTH, sizeof(bool));
+    trigger_queue = xQueueCreate(Config::QUEUE_LENGTH, sizeof(bool));
 
     if (!init_i2s())
     {
@@ -130,7 +127,7 @@ void setup()
 void loop()
 {
     const size_t bytes = fill_audio_block(audio_buffer, Config::FRAMES_PER_BLOCK);
-    const size_t written = i2s.write(reinterpret_cast<uint8_t *>(audio_buffer), bytes);
+    i2s.write(reinterpret_cast<uint8_t *>(audio_buffer), bytes);
 
     usbMidi.update();
 }
