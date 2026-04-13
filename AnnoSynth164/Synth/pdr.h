@@ -10,7 +10,8 @@
  *   WAV input:  mono or stereo (mixed to mono), PCM only
  *               16 or 24 bit (reduced to 16 bit via predictive rounding with lookahead)
  *               any sample rate (preserved, not resampled)
- *   Output:     input.h with static const uint8_t input[] = {...};
+ *   Output:     input.h   C header with static const uint8_t input[] = {...};
+ *               input.pdr raw binary in .pdr format (see below)
  *
  * Decoder (C99, header-only):
  *   #include "pdr.h"
@@ -204,5 +205,8 @@ if __name__ == '__main__':
             f.write(f' 0x{b:02X}{"," if i+1<len(pdr) else ""}')
             if (i+1) % 12 == 0 and i+1 < len(pdr): f.write('\n   ')
         f.write(f'\n}}; /* {len(pdr)} bytes, {n} samples */\n')
-    print(f'{n} samples -> {len(pdr)} bytes ({n*2/len(pdr):.1f}x) -> {h_path}')
+    pdr_path = os.path.splitext(wav_path)[0] + '.pdr'
+    with open(pdr_path, 'wb') as f:
+        f.write(pdr)
+    print(f'{n} samples -> {len(pdr)} bytes ({n*2/len(pdr):.1f}x) -> {h_path}, {pdr_path}')
 #endif
