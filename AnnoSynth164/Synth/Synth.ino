@@ -3,7 +3,11 @@
 #include "UsbMidi.h"
 
 #include "pdr.h"
-#include "kick_3.h"
+// #include "kick_3.h"
+// #include "snare_3.h"
+
+#include "incbin.h"
+INCBIN(drums, "audio/snare3.pdr", "audio/kick3.pdr", "audio/ride3.pdr", "audio/hihatClosed3.pdr");
 
 // ── Configuration ──────────────────────────────────────────
 namespace Config
@@ -12,7 +16,7 @@ namespace Config
     constexpr size_t QUEUE_LENGTH = 16;
 
     // Audio parameters
-    constexpr uint32_t SAMPLE_RATE = 48000;    
+    constexpr uint32_t SAMPLE_RATE = 48000;
     constexpr uint16_t FRAMES_PER_BLOCK = 128;
 
     // I2S pin assignment (adjust to your board)
@@ -35,6 +39,7 @@ static UsbMidi usbMidi;
 
 static pdr_t pdr_state = {0};
 
+static uint8_t drum_index = 0;
 
 // ── Helper functions ───────────────────────────────────────
 
@@ -49,7 +54,12 @@ static size_t fill_audio_block(int16_t *buf, uint16_t frames)
         bool trigger = false;
         xQueueReceive(trigger_queue, &trigger, 0);
 
-        const int16_t sample = pdr_decode(&pdr_state, kick_3, trigger);
+        if (trigger)
+        {
+            drum_index = (drum_index + 1) % INCBIN_COUNT(drums);
+        }
+
+        const int16_t sample = pdr_decode(&pdr_state, drums[drum_index].data, trigger);
         buf[i * 2] = sample;     // left
         buf[i * 2 + 1] = sample; // right
     }
@@ -82,8 +92,8 @@ void tsprint(const char *msg)
 // ── MIDI callbacks ───────────────────────────────────
 
 void onMidiMessage(const uint8_t (&data)[4])
-{    
-    uint8_t status   = data[1] & 0xF0;
+{
+    uint8_t status = data[1] & 0xF0;
     uint8_t velocity = data[3];
 
     if (status == 0x90 && velocity > 0)
