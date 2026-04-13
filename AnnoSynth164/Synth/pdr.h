@@ -95,8 +95,7 @@ static inline int16_t pdr_decode(pdr_t *d, const uint8_t *data, bool retrigger)
         d->buf <<= k; d->nb -= k;
     }
     int s = 2 * d->p1 - d->p2 + ((int)(z >> 1) ^ -(int)(z & 1));
-    if (s >  32767) s =  32767;
-    if (s < -32768) s = -32768;
+    s = ((s + 32768) & 0xFFFF) - 32768;
     d->p2 = d->p1;
     d->p1 = (int16_t)s;
     d->A += z;
