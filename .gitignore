@@ -1,6 +1,7 @@
 # Scala-CLI specific directories
 /bin/
 */bin/
+build/
 
 # Compiled files
 *.bin
@@ -11,6 +12,4 @@
 # ESP32-P4 secific files
 build.options.json
 flash_args
-partitions.csv
 sdkconfig
-
