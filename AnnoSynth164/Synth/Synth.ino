@@ -52,7 +52,7 @@ static size_t fill_audio_block(int16_t *buf, uint16_t frames)
             voice_index = (voice_index + 1) % 4;
         }
 
-        const int16_t sample = static_cast<int16_t>(lrintf(32768.0f * pdr_play(0, trigger ? voice_index+1 : 0, 0)));
+        const int16_t sample = static_cast<int16_t>(pdr_play(0, trigger ? voice_index+1 : 0, 0));
         buf[i * 2] = sample;     // left
         buf[i * 2 + 1] = sample; // right
     }
