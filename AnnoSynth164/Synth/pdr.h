@@ -1,5 +1,5 @@
 #if 0
-1//1 or """
+""""
 #endif
 
 /*
@@ -22,44 +22,46 @@
  *   0       → no trigger, continue current playback
  *   1 .. N  → rising edge triggers variation (value - 1)
  */
+
 #ifndef PDR_FAUST_H
 #define PDR_FAUST_H
 
 #ifndef __cplusplus
-  #error "pdr_faust.h requires C++."
+#error "pdr_faust.h requires C++."
 #endif
 #if !defined(__GNUC__) && !defined(__clang__)
-  #error "pdr_faust.h requires GCC or Clang (uses __asm__ .incbin)."
+#error "pdr_faust.h requires GCC or Clang (uses __asm__ .incbin)."
 #endif
 
-#include <cstdint>
-#include <cstddef>
+#include <stdint.h>
+#include <stddef.h>
 
 /* ==========================================================================
  * USER CONFIGURATION — only section users need to edit
  * ==========================================================================*/
 
-#define PDR_CONFIG                                                             \
-    PDR_VOICE(0, "audio/kick3.pdr",  "audio/snare3.pdr",  "audio/ride3.pdr", "audio/hihatClosed3.pdr");\
-    PDR_VOICE(1);\
-    PDR_VOICE(2);\
-    PDR_VOICE(3);\
-    PDR_VOICE(4);\
-    PDR_VOICE(5);\
-    PDR_VOICE(6);\  
-    PDR_VOICE(7);\
-    PDR_VOICE(8);\
-    PDR_VOICE(9);\
-    PDR_VOICE(10);\
+#define PDR_CONFIG                                                                                    \
+    PDR_VOICE(0, "audio/kick3.pdr", "audio/snare3.pdr", "audio/ride3.pdr", "audio/hihatClosed3.pdr"); \
+    PDR_VOICE(1);                                                                                     \
+    PDR_VOICE(2);                                                                                     \
+    PDR_VOICE(3);                                                                                     \
+    PDR_VOICE(4);                                                                                     \
+    PDR_VOICE(5);                                                                                     \
+    PDR_VOICE(6);                                                                                     \
+    PDR_VOICE(7);                                                                                     \
+    PDR_VOICE(8);                                                                                     \
+    PDR_VOICE(9);                                                                                     \
+    PDR_VOICE(10);                                                                                    \
     PDR_VOICE(11)
 
 /* ==========================================================================
  * Decoder — no user-editable code below
  * ==========================================================================*/
 
-struct PdrEntry {
-    const std::uint8_t *data;
-    const std::uint8_t *end;
+struct PdrEntry
+{
+    const uint8_t *data;
+    const uint8_t *end;
 };
 
 /* Forward declarations — arrays defined at end of file via PDR_CONFIG. */
@@ -76,44 +78,50 @@ extern const PdrEntry pdr_voice_9[];
 extern const PdrEntry pdr_voice_10[];
 extern const PdrEntry pdr_voice_11[];
 
-namespace {
+namespace
+{
 
-constexpr int PDR_MAX_VOICES = 12;
+    constexpr int PDR_MAX_VOICES = 12;
 
-struct PdrState {
-    const std::uint8_t *ptr;        /* bitstream read pointer          */
-    const std::uint8_t *end;        /* bitstream end                   */
-    std::uint32_t       buf;        /* MSB-aligned bit accumulator     */
-    std::uint32_t       rsum;       /* Rice adaptive sum               */
-    std::uint32_t       rcnt;       /* Rice adaptive count             */
-    std::uint32_t       total;      /* total samples in .pdr file      */
-    std::uint32_t       idx;        /* current output sample index     */
-    int                 nbits;      /* valid bits in buf               */
-    std::int16_t        prev1;      /* previous decoded sample         */
-    std::int16_t        prev2;      /* sample before that              */
-    int                 prev_trig;  /* last trigger value (edge detect)*/
-};
+    struct PdrState
+    {
+        const uint8_t *ptr; /* bitstream read pointer          */
+        const uint8_t *end; /* bitstream end                   */
+        uint32_t buf;       /* MSB-aligned bit accumulator     */
+        uint32_t rsum;      /* Rice adaptive sum               */
+        uint32_t rcnt;      /* Rice adaptive count             */
+        uint32_t total;     /* total samples in .pdr file      */
+        uint32_t idx;       /* current output sample index     */
+        int nbits;               /* valid bits in buf               */
+        int16_t prev1;      /* previous decoded sample         */
+        int16_t prev2;      /* sample before that              */
+        int prev_trig;           /* last trigger value (edge detect)*/
+    };
 
-PdrState pdr_state[PDR_MAX_VOICES] = {};
+    PdrState pdr_state[PDR_MAX_VOICES] = {};
 
 /* Dispatch: empty voice detected via arr[0].data == nullptr (sentinel).
  * Count via runtime sentinel search (arrays are forward-declared, size unknown
  * at this point, so sizeof is not available — trailing PDR_EMPTY_ENTRY in
  * populated voices lets us count by walking until the terminator). */
-#define PDR_DISPATCH(N)                                                 \
-    case N: {                                                           \
-        if (pdr_voice_##N[0].data != nullptr) {                         \
-            int cnt = 0;                                                \
-            while (pdr_voice_##N[cnt].data != nullptr) cnt++;           \
-            if (var < cnt) {                                            \
-                vdata = pdr_voice_##N[var].data;                        \
-                vend  = pdr_voice_##N[var].end;                         \
-            }                                                           \
-        }                                                               \
-        break;                                                          \
+#define PDR_DISPATCH(N)                                \
+    case N:                                            \
+    {                                                  \
+        if (pdr_voice_##N[0].data != nullptr)          \
+        {                                              \
+            int cnt = 0;                               \
+            while (pdr_voice_##N[cnt].data != nullptr) \
+                cnt++;                                 \
+            if (var < cnt)                             \
+            {                                          \
+                vdata = pdr_voice_##N[var].data;       \
+                vend = pdr_voice_##N[var].end;         \
+            }                                          \
+        }                                              \
+        break;                                         \
     }
 
-}  // anonymous namespace
+} // anonymous namespace
 
 /* --------------------------------------------------------------------------
  * pdr_play — FAUST entry point, external C linkage
@@ -123,94 +131,103 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
 {
     static_cast<void>(tick);
 
-    if (voice < 0 || voice >= PDR_MAX_VOICES) return 0.0f;
+    if (voice < 0 || voice >= PDR_MAX_VOICES)
+        return 0.0f;
 
-    auto& s = pdr_state[voice];
+    auto &s = pdr_state[voice];
 
     /* Rising edge detection → retrigger with encoded variation.
      * `prev <= 0` (not `== 0`) protects against negative trigger values. */
     const bool retrig = (trig > 0) && (s.prev_trig <= 0);
     s.prev_trig = trig;
 
-    if (retrig) {
-        const std::uint8_t *vdata = nullptr;
-        const std::uint8_t *vend  = nullptr;
+    if (retrig)
+    {
+        const uint8_t *vdata = nullptr;
+        const uint8_t *vend = nullptr;
         const int var = trig - 1;
 
-        if (var >= 0) switch (voice) {
-            PDR_DISPATCH( 0)
-            PDR_DISPATCH( 1)
-            PDR_DISPATCH( 2)
-            PDR_DISPATCH( 3)
-            PDR_DISPATCH( 4)
-            PDR_DISPATCH( 5)
-            PDR_DISPATCH( 6)
-            PDR_DISPATCH( 7)
-            PDR_DISPATCH( 8)
-            PDR_DISPATCH( 9)
-            PDR_DISPATCH(10)
-            PDR_DISPATCH(11)
-            default: break;
-        }
+        if (var >= 0)
+            switch (voice)
+            {
+                PDR_DISPATCH(0)
+                PDR_DISPATCH(1)
+                PDR_DISPATCH(2)
+                PDR_DISPATCH(3)
+                PDR_DISPATCH(4)
+                PDR_DISPATCH(5)
+                PDR_DISPATCH(6)
+                PDR_DISPATCH(7)
+                PDR_DISPATCH(8)
+                PDR_DISPATCH(9)
+                PDR_DISPATCH(10)
+                PDR_DISPATCH(11)
+            default:
+                break;
+            }
 
-        if (vdata && vend > vdata
-         && static_cast<std::size_t>(vend - vdata) >= 12
-         && vdata[0] == 'P' && vdata[1] == 'D' && vdata[2] == 'R') {
+        if (vdata && vend > vdata && static_cast<size_t>(vend - vdata) >= 12 && vdata[0] == 'P' && vdata[1] == 'D' && vdata[2] == 'R')
+        {
             /* Cap seed to 30 to prevent overflow in (2u << seed). */
-            std::uint8_t seed = vdata[3];
-            if (seed > 30) seed = 30;
+            uint8_t seed = vdata[3];
+            if (seed > 30)
+                seed = 30;
 
-            s.total = static_cast<std::uint32_t>(vdata[4])
-                    | (static_cast<std::uint32_t>(vdata[5]) <<  8)
-                    | (static_cast<std::uint32_t>(vdata[6]) << 16)
-                    | (static_cast<std::uint32_t>(vdata[7]) << 24);
-            s.prev2 = static_cast<std::int16_t>(vdata[ 8] | (vdata[ 9] << 8));
-            s.prev1 = static_cast<std::int16_t>(vdata[10] | (vdata[11] << 8));
-            s.idx   = 0;
-            s.ptr   = vdata + 12;
-            s.end   = vend;
-            s.buf   = 0;
+            s.total = static_cast<uint32_t>(vdata[4]) | (static_cast<uint32_t>(vdata[5]) << 8) | (static_cast<uint32_t>(vdata[6]) << 16) | (static_cast<uint32_t>(vdata[7]) << 24);
+            s.prev2 = static_cast<int16_t>(vdata[8] | (vdata[9] << 8));
+            s.prev1 = static_cast<int16_t>(vdata[10] | (vdata[11] << 8));
+            s.idx = 0;
+            s.ptr = vdata + 12;
+            s.end = vend;
+            s.buf = 0;
             s.nbits = 0;
-            s.rsum  = 2u << seed;
-            s.rcnt  = 2;
+            s.rsum = 2u << seed;
+            s.rcnt = 2;
         }
         /* invalid / empty / bad magic → no re-init, continue current playback */
     }
 
     /* End of sample → silence. */
-    if (s.idx >= s.total) return 0.0f;
+    if (s.idx >= s.total)
+        return 0.0f;
 
     /* First two samples are stored verbatim in the header. */
-    if (s.idx++ < 2) {
-        const std::int16_t hdr = (s.idx == 1) ? s.prev2 : s.prev1;
+    if (s.idx++ < 2)
+    {
+        const int16_t hdr = (s.idx == 1) ? s.prev2 : s.prev1;
         return static_cast<float>(hdr) / 32768.0f;
     }
 
     /* Refill bit buffer. */
-    while (s.nbits <= 24 && s.ptr < s.end) {
-        s.buf |= static_cast<std::uint32_t>(*s.ptr++) << (24 - s.nbits);
+    while (s.nbits <= 24 && s.ptr < s.end)
+    {
+        s.buf |= static_cast<uint32_t>(*s.ptr++) << (24 - s.nbits);
         s.nbits += 8;
     }
 
     /* Bitstream fully exhausted AND buffer empty → clean end-of-sample. */
-    if (s.nbits <= 0 && s.ptr >= s.end) {
+    if (s.nbits <= 0 && s.ptr >= s.end)
+    {
         s.idx = s.total;
         return 0.0f;
     }
 
     /* Rice decode: k from adaptive (rsum / rcnt). */
     int k = 0;
-    while (k < 31 && (s.rcnt << (k + 1)) <= s.rsum) k++;
+    while (k < 31 && (s.rcnt << (k + 1)) <= s.rsum)
+        k++;
 
     /* Unary quotient. */
     int q = 0;
-    while ((s.buf >> 31) & 1) {
+    while ((s.buf >> 31) & 1)
+    {
         s.buf <<= 1;
         s.nbits--;
         q++;
         if (s.nbits < 8)
-            while (s.nbits <= 24 && s.ptr < s.end) {
-                s.buf |= static_cast<std::uint32_t>(*s.ptr++) << (24 - s.nbits);
+            while (s.nbits <= 24 && s.ptr < s.end)
+            {
+                s.buf |= static_cast<uint32_t>(*s.ptr++) << (24 - s.nbits);
                 s.nbits += 8;
             }
     }
@@ -218,11 +235,13 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
     s.nbits--;
 
     /* k binary remainder bits. */
-    std::uint32_t code = static_cast<std::uint32_t>(q);
-    if (k) {
+    uint32_t code = static_cast<uint32_t>(q);
+    if (k)
+    {
         if (s.nbits < k)
-            while (s.nbits <= 24 && s.ptr < s.end) {
-                s.buf |= static_cast<std::uint32_t>(*s.ptr++) << (24 - s.nbits);
+            while (s.nbits <= 24 && s.ptr < s.end)
+            {
+                s.buf |= static_cast<uint32_t>(*s.ptr++) << (24 - s.nbits);
                 s.nbits += 8;
             }
         code = (code << k) | (s.buf >> (32 - k));
@@ -231,16 +250,16 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
     }
 
     /* Zigzag undo + delta2 undo. */
-    int out = 2 * s.prev1 - s.prev2
-            + (static_cast<int>(code >> 1) ^ -static_cast<int>(code & 1));
+    int out = 2 * s.prev1 - s.prev2 + (static_cast<int>(code >> 1) ^ -static_cast<int>(code & 1));
     out = ((out + 32768) & 0xFFFF) - 32768;
 
     s.prev2 = s.prev1;
-    s.prev1 = static_cast<std::int16_t>(out);
+    s.prev1 = static_cast<int16_t>(out);
 
     /* Adaptive Rice parameter update. */
     s.rsum += code;
-    if (++s.rcnt > 64) {
+    if (++s.rcnt > 64)
+    {
         s.rsum >>= 1;
         s.rcnt >>= 1;
     }
@@ -262,33 +281,31 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
  * EMBED — inline-asm binary include (GCC/Clang, ELF)
  * --------------------------------------------------------------------------*/
 
-#define EMBED(name, file)                                      \
-    __asm__(".section .rodata\n"                               \
-            ".balign 4\n"                                      \
-            ".global " #name "_start\n"                        \
-            #name "_start:\n"                                  \
-            ".incbin \"" file "\"\n"                           \
-            ".global " #name "_end\n"                          \
-            #name "_end:\n"                                    \
-            ".previous\n");                                    \
-    extern const std::uint8_t name##_start[];                  \
-    extern const std::uint8_t name##_end[]
+#define EMBED(name, file)                                 \
+    __asm__(".section .rodata\n"                          \
+            ".balign 4\n"                                 \
+            ".global " #name "_start\n" #name "_start:\n" \
+            ".incbin \"" file "\"\n"                      \
+            ".global " #name "_end\n" #name "_end:\n"     \
+            ".previous\n");                               \
+    extern const uint8_t name##_start[];             \
+    extern const uint8_t name##_end[]
 
 /* --------------------------------------------------------------------------
  * Helpers
  * --------------------------------------------------------------------------*/
 
-#define PDR_SYM_(v, s)           _pdr_v##v##_s##s
-#define PDR_SYM(v, s)            PDR_SYM_(v, s)
+#define PDR_SYM_(v, s) _pdr_v##v##_s##s
+#define PDR_SYM(v, s) PDR_SYM_(v, s)
 
-#define PDR_EMBED_I(name, file)  EMBED(name, file)
+#define PDR_EMBED_I(name, file) EMBED(name, file)
 
-#define PDR_ENTRY_I(name)        { name##_start, name##_end }
-#define PDR_ENTRY(name)          PDR_ENTRY_I(name)
-#define PDR_EMPTY_ENTRY          { nullptr, nullptr }
+#define PDR_ENTRY_I(name) {name##_start, name##_end}
+#define PDR_ENTRY(name) PDR_ENTRY_I(name)
+#define PDR_EMPTY_ENTRY {nullptr, nullptr}
 
-#define PDR_CAT_(a, b)           a##b
-#define PDR_CAT(a, b)            PDR_CAT_(a, b)
+#define PDR_CAT_(a, b) a##b
+#define PDR_CAT(a, b) PDR_CAT_(a, b)
 
 /* --------------------------------------------------------------------------
  * FOREACH-with-index (compresses what would otherwise be 8 arity macros)
@@ -303,9 +320,9 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
 #define PDR_INC_6 7
 #define PDR_INC_7 8
 #define PDR_INC_(x) PDR_INC_##x
-#define PDR_INC(x)  PDR_INC_(x)
+#define PDR_INC(x) PDR_INC_(x)
 
-#define PDR_FE_1(M, c, i, x)      M(c, i, x)
+#define PDR_FE_1(M, c, i, x) M(c, i, x)
 #define PDR_FE_2(M, c, i, x, ...) M(c, i, x) PDR_FE_1(M, c, PDR_INC(i), __VA_ARGS__)
 #define PDR_FE_3(M, c, i, x, ...) M(c, i, x) PDR_FE_2(M, c, PDR_INC(i), __VA_ARGS__)
 #define PDR_FE_4(M, c, i, x, ...) M(c, i, x) PDR_FE_3(M, c, PDR_INC(i), __VA_ARGS__)
@@ -314,38 +331,37 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
 #define PDR_FE_7(M, c, i, x, ...) M(c, i, x) PDR_FE_6(M, c, PDR_INC(i), __VA_ARGS__)
 #define PDR_FE_8(M, c, i, x, ...) M(c, i, x) PDR_FE_7(M, c, PDR_INC(i), __VA_ARGS__)
 
-#define PDR_FE_PICK(_1,_2,_3,_4,_5,_6,_7,_8,NAME,...) NAME
+#define PDR_FE_PICK(_1, _2, _3, _4, _5, _6, _7, _8, NAME, ...) NAME
 #define PDR_FOREACH(M, ctx, ...)                                     \
     PDR_FE_PICK(__VA_ARGS__, PDR_FE_8, PDR_FE_7, PDR_FE_6, PDR_FE_5, \
-                             PDR_FE_4, PDR_FE_3, PDR_FE_2, PDR_FE_1) \
-        (M, ctx, 0, __VA_ARGS__)
+                PDR_FE_4, PDR_FE_3, PDR_FE_2, PDR_FE_1)              \
+    (M, ctx, 0, __VA_ARGS__)
 
-#define PDR_EMIT_EMBED(n, i, f)  PDR_EMBED_I(PDR_SYM(n, i), f);
-#define PDR_EMIT_ENTRY(n, i, _)  PDR_ENTRY(PDR_SYM(n, i)),
+#define PDR_EMIT_EMBED(n, i, f) PDR_EMBED_I(PDR_SYM(n, i), f);
+#define PDR_EMIT_ENTRY(n, i, _) PDR_ENTRY(PDR_SYM(n, i)),
 
 /* --------------------------------------------------------------------------
  * PDR_VOICE — unified populated / empty dispatch via __VA_OPT__
  * --------------------------------------------------------------------------*/
 
-#define PDR_ISEMPTY(...)       PDR_ISEMPTY_I(__VA_OPT__(0,) 1)
-#define PDR_ISEMPTY_I(X, ...)  X
+#define PDR_ISEMPTY(...) PDR_ISEMPTY_I(__VA_OPT__(0, ) 1)
+#define PDR_ISEMPTY_I(X, ...) X
 
 #define PDR_VOICE(n, ...) \
-    PDR_CAT(PDR_VOICE_IMPL_, PDR_ISEMPTY(__VA_ARGS__))(n __VA_OPT__(,) __VA_ARGS__)
+    PDR_CAT(PDR_VOICE_IMPL_, PDR_ISEMPTY(__VA_ARGS__))(n __VA_OPT__(, ) __VA_ARGS__)
 
 /* Arrays use `extern const` to match the forward declarations above.
  * Trailing PDR_EMPTY_ENTRY sentinel enables runtime size detection without
  * sizeof (required because arrays are incomplete at the pdr_play site). */
 
 #define PDR_VOICE_IMPL_1(n) \
-    extern const PdrEntry pdr_voice_##n[] = { PDR_EMPTY_ENTRY }
+    extern const PdrEntry pdr_voice_##n[] = {PDR_EMPTY_ENTRY}
 
-#define PDR_VOICE_IMPL_0(n, ...)                                              \
-    PDR_FOREACH(PDR_EMIT_EMBED, n, __VA_ARGS__)                               \
-    extern const PdrEntry pdr_voice_##n[] = {                                 \
-        PDR_FOREACH(PDR_EMIT_ENTRY, n, __VA_ARGS__)                           \
-        PDR_EMPTY_ENTRY                                                       \
-    }
+#define PDR_VOICE_IMPL_0(n, ...)                    \
+    PDR_FOREACH(PDR_EMIT_EMBED, n, __VA_ARGS__)     \
+    extern const PdrEntry pdr_voice_##n[] = {       \
+        PDR_FOREACH(PDR_EMIT_ENTRY, n, __VA_ARGS__) \
+            PDR_EMPTY_ENTRY}
 
 /* --------------------------------------------------------------------------
  * Expand USER CONFIGURATION
@@ -353,9 +369,11 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
 
 PDR_CONFIG;
 
-#endif
+
+#endif /* PDR_PLAY_H */
 #if 0
-1//1 and """
+"x"""
+
 import sys, os, re, struct, wave, math
 
 def zigzag(v):
@@ -458,4 +476,9 @@ if __name__ == '__main__':
     with open(pdr_path, 'wb') as f:
         f.write(pdr)
     print(f'{n} samples -> {len(pdr)} bytes ({n*2/len(pdr):.1f}x) -> {h_path}, {pdr_path}')
+
+""""
+#endif
+#if 0
+"x"""
 #endif
