@@ -412,23 +412,74 @@ def encode(pcm24):
     pcm = [0] * n
     pcm[0] = max(-32768, min(32767, (pcm24[0] + 128) >> 8))
     if n > 1: pcm[1] = max(-32768, min(32767, (pcm24[1] + 128) >> 8))
+
+#Seed the Rice state from the first 256 truncated delta2 values so the
+#adaptive k at sample index 2 matches what Phase 2 would compute.
+    d2_seed = []
+    prev1, prev2 = pcm[1] if n > 1 else 0, pcm[0]
+    for i in range(2, min(n, 258)):
+        base = pcm24[i] >> 8
+        d2_seed.append(((base - 2*prev1 + prev2 + 32768) % 65536) - 32768)
+        prev2 = prev1; prev1 = base
+    zz_seed = [zigzag(v) for v in d2_seed]
+    sk = max(0, int(math.log2(sum(zz_seed)/max(len(zz_seed),1)))) if sum(zz_seed) > 0 else 0
+    A, N = max(1, (1 << sk) * 2), 2
+
+    def rice_bits(z, A, N):
+        k = 0
+        while k < 31 and (N << (k+1)) <= A: k += 1
+        q = z >> k if k > 0 else z
+        return q + 1 + k  # unary (q ones + terminator) + k remainder bits
+
     for i in range(2, n):
-        pred = 2 * pcm[i-1] - pcm[i-2]
-        lo = pcm24[i] >> 8
-        hi = min(32767, lo + 1)
+#Three rounding candidates : -1 / 0 / +1 LSB around the truncated value,
+#each clipped to int16.Pick the one whose actual Rice - bit cost,
+#for THIS sample plus the best achievable cost of the NEXT sample,
+#is minimal.Rice state(A, N) is evaluated at the current position.
+        base = pcm24[i] >> 8
+        cands = [max(-32768, min(32767, base + d)) for d in (-1, 0, 1)]
+
         if i + 1 < n:
-            plo = 2 * lo - pcm[i-1]
-            phi = 2 * hi - pcm[i-1]
-            ln = pcm24[i+1] >> 8
-            hn = min(32767, (pcm24[i+1] >> 8) + 1)
-            cl = abs(((lo-pred+32768)%65536)-32768) + min(
-                abs(((ln-plo+32768)%65536)-32768), abs(((hn-plo+32768)%65536)-32768))
-            ch = abs(((hi-pred+32768)%65536)-32768) + min(
-                abs(((ln-phi+32768)%65536)-32768), abs(((hn-phi+32768)%65536)-32768))
-            pcm[i] = lo if cl <= ch else hi
+            next_base = pcm24[i+1] >> 8
+            next_cands = [max(-32768, min(32767, next_base + d)) for d in (-1, 0, 1)]
+            best_cost = None
+            best_c = cands[1]
+#Iterate in preference order(0, +1, -1) so ties favour the
+#truncate - base value and keep the - 1 option as a last resort.
+            for d in (0, 1, -1):
+                c = cands[d + 1]
+                d2_here = ((c - 2*pcm[i-1] + pcm[i-2] + 32768) % 65536) - 32768
+                zz_here = zigzag(d2_here)
+                bits_here = rice_bits(zz_here, A, N)
+#Advance Rice state one step to evaluate the next sample
+                A_next, N_next = A + zz_here, N + 1
+                if N_next > 64: A_next >>= 1; N_next >>= 1
+                bits_next = min(
+                    rice_bits(zigzag(((nc - 2*c + pcm[i-1] + 32768) % 65536) - 32768),
+                              A_next, N_next)
+                    for nc in next_cands)
+                cost = bits_here + bits_next
+                if best_cost is None or cost < best_cost:
+                    best_cost = cost
+                    best_c = c
+            pcm[i] = best_c
         else:
-            pcm[i] = lo if abs(((lo-pred+32768)%65536)-32768) <= abs(((hi-pred+32768)%65536)-32768) else hi
-        pcm[i] = max(-32768, min(32767, pcm[i]))
+            best_cost = None
+            best_c = cands[1]
+            for d in (0, 1, -1):
+                c = cands[d + 1]
+                d2_here = ((c - 2*pcm[i-1] + pcm[i-2] + 32768) % 65536) - 32768
+                cost = rice_bits(zigzag(d2_here), A, N)
+                if best_cost is None or cost < best_cost:
+                    best_cost = cost
+                    best_c = c
+            pcm[i] = best_c
+
+#Advance Rice state with the chosen sample
+        z_chosen = zigzag(((pcm[i] - 2*pcm[i-1] + pcm[i-2] + 32768) % 65536) - 32768)
+        A += z_chosen; N += 1
+        if N > 64: A >>= 1; N >>= 1
+
     d2 = [((pcm[i]-2*pcm[i-1]+pcm[i-2]+32768)%65536)-32768 for i in range(2,n)]
     zz = [zigzag(v) for v in d2[:256]]
     sk = max(0, int(math.log2(sum(zz)/max(len(zz),1)))) if sum(zz) > 0 else 0
