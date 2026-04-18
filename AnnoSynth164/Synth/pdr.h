@@ -3,13 +3,13 @@
 #endif
 
 /*
- * pdr_faust.h — PDR decoder for FAUST ffunction() (C++ only)
+ * pdr.h — PDR decoder for FAUST ffunction() (C++ only)
  *
  * Samples embedded via inline-asm (GCC/Clang, ELF platforms — Linux/ESP32).
  *
  * Usage in FAUST:
  *
- *   pdr_play = ffunction(float pdr_play(int, int, int), <pdr_faust.h>, "");
+ *   pdr_play = ffunction(float pdr_play(int, int, int), <pdr.h>, "");
  *   tick     = +(1) ~ _;
  *   kick     = pdr_play(0, button("kick") * (1 + nentry("kick_var", 0, 0, 3, 1)) : int, tick);
  *   process  = kick;
@@ -23,14 +23,14 @@
  *   1 .. N  → rising edge triggers variation (value - 1)
  */
 
-#ifndef PDR_FAUST_H
-#define PDR_FAUST_H
+#ifndef PDR_H
+#define PDR_H
 
 #ifndef __cplusplus
-#error "pdr_faust.h requires C++."
+#error "pdr.h requires C++."
 #endif
 #if !defined(__GNUC__) && !defined(__clang__)
-#error "pdr_faust.h requires GCC or Clang (uses __asm__ .incbin)."
+#error "pdr.h requires GCC or Clang (uses __asm__ .incbin)."
 #endif
 
 #include <stdint.h>
@@ -92,10 +92,10 @@ namespace
         uint32_t rcnt;      /* Rice adaptive count             */
         uint32_t total;     /* total samples in .pdr file      */
         uint32_t idx;       /* current output sample index     */
-        int nbits;               /* valid bits in buf               */
+        int nbits;          /* valid bits in buf               */
         int16_t prev1;      /* previous decoded sample         */
         int16_t prev2;      /* sample before that              */
-        int prev_trig;           /* last trigger value (edge detect)*/
+        int prev_trig;      /* last trigger value (edge detect)*/
     };
 
     PdrState pdr_state[PDR_MAX_VOICES] = {};
@@ -288,7 +288,7 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
             ".incbin \"" file "\"\n"                      \
             ".global " #name "_end\n" #name "_end:\n"     \
             ".previous\n");                               \
-    extern const uint8_t name##_start[];             \
+    extern const uint8_t name##_start[];                  \
     extern const uint8_t name##_end[]
 
 /* --------------------------------------------------------------------------
@@ -369,8 +369,8 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
 
 PDR_CONFIG;
 
+#endif /* PDR_H */
 
-#endif /* PDR_PLAY_H */
 #if 0
 "x"""
 
@@ -476,9 +476,4 @@ if __name__ == '__main__':
     with open(pdr_path, 'wb') as f:
         f.write(pdr)
     print(f'{n} samples -> {len(pdr)} bytes ({n*2/len(pdr):.1f}x) -> {h_path}, {pdr_path}')
-
-""""
-#endif
-#if 0
-"x"""
 #endif
