@@ -407,7 +407,17 @@ def read_wav(path):
         pcm.append(s)
     return pcm, n
 
-def encode(pcm24):
+def encode(pcm24, bits=0):
+# `bits` controls the rounding - tolerance window:
+#bits = 0->1 candidate(lossless : exact truncation, no search)
+#bits = 1->3 candidates(-1, 0, +1)
+#bits = 2->5 candidates(-2 ..+ 2)
+#bits = 3->7 candidates(-3 ..+ 3)
+#Every extra bit doubles the search space(this *next) and increases
+#encoder runtime, in exchange for potentially better Rice - cost minima.
+    if bits < 0: bits = 0
+    offsets = list(range(-bits, bits + 1))   # e.g. [-1, 0, 1] for bits=1
+
     n = len(pcm24)
     pcm = [0] * n
     pcm[0] = max(-32768, min(32767, (pcm24[0] + 128) >> 8))
@@ -432,22 +442,24 @@ def encode(pcm24):
         return q + 1 + k  # unary (q ones + terminator) + k remainder bits
 
     for i in range(2, n):
-#Three rounding candidates : -1 / 0 / +1 LSB around the truncated value,
-#each clipped to int16.Pick the one whose actual Rice - bit cost,
-#for THIS sample plus the best achievable cost of the NEXT sample,
-#is minimal.Rice state(A, N) is evaluated at the current position.
+#Candidate set : base + d for d in offsets, clipped to int16.Pick the
+#one whose actual Rice - bit cost, for THIS sample plus the best
+#achievable cost of the NEXT sample, is minimal.Rice state(A, N)
+#is evaluated at the current position.
         base = pcm24[i] >> 8
-        cands = [max(-32768, min(32767, base + d)) for d in (-1, 0, 1)]
+        cands = [max(-32768, min(32767, base + d)) for d in offsets]
 
         if i + 1 < n:
             next_base = pcm24[i+1] >> 8
-            next_cands = [max(-32768, min(32767, next_base + d)) for d in (-1, 0, 1)]
+            next_cands = [max(-32768, min(32767, next_base + d)) for d in offsets]
+#Tie - break order : 0 first, then outward(+1, -1, +2, -2, ...),
+#so ties favour the truncate base and larger deviations stay
+#last resort.
+            order = sorted(range(len(offsets)), key=lambda j: (abs(offsets[j]), -offsets[j]))
             best_cost = None
-            best_c = cands[1]
-#Iterate in preference order(0, +1, -1) so ties favour the
-#truncate - base value and keep the - 1 option as a last resort.
-            for d in (0, 1, -1):
-                c = cands[d + 1]
+            best_c = cands[offsets.index(0)]
+            for j in order:
+                c = cands[j]
                 d2_here = ((c - 2*pcm[i-1] + pcm[i-2] + 32768) % 65536) - 32768
                 zz_here = zigzag(d2_here)
                 bits_here = rice_bits(zz_here, A, N)
@@ -464,10 +476,11 @@ def encode(pcm24):
                     best_c = c
             pcm[i] = best_c
         else:
+            order = sorted(range(len(offsets)), key=lambda j: (abs(offsets[j]), -offsets[j]))
             best_cost = None
-            best_c = cands[1]
-            for d in (0, 1, -1):
-                c = cands[d + 1]
+            best_c = cands[offsets.index(0)]
+            for j in order:
+                c = cands[j]
                 d2_here = ((c - 2*pcm[i-1] + pcm[i-2] + 32768) % 65536) - 32768
                 cost = rice_bits(zigzag(d2_here), A, N)
                 if best_cost is None or cost < best_cost:
@@ -504,14 +517,18 @@ def encode(pcm24):
     return hdr + bytes(data)
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print(f'usage: python3 {sys.argv[0]} input.wav')
+    if len(sys.argv) not in (2, 3):
+        print(f'usage: python3 {sys.argv[0]} input.wav [bits]')
+        print(f'  bits: rounding tolerance in LSB (default 0 -> lossless)')
+        print(f'        0->1 cand (lossless), 1->3 cands, 2->5 cands, 3->7 cands')
+        print(f'        higher values may shrink output at the cost of small PCM error')
         sys.exit(1)
     wav_path = sys.argv[1]
+    bits = int(sys.argv[2]) if len(sys.argv) == 3 else 0
     pcm24, n = read_wav(wav_path)
-    pdr = encode(pcm24)
+    pdr = encode(pcm24, bits=bits)
     pdr_path = os.path.splitext(wav_path)[0] + '.pdr'
     with open(pdr_path, 'wb') as f:
         f.write(pdr)
-    print(f'{n} samples -> {len(pdr)} bytes ({n*2/len(pdr):.1f}x) -> {pdr_path}')
+    print(f'{n} samples -> {len(pdr)} bytes ({n*2/len(pdr):.1f}x, bits={bits}) -> {pdr_path}')
 #endif
