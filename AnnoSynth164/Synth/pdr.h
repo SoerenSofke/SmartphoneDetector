@@ -7,11 +7,15 @@
  *
  * Samples embedded via inline-asm (GCC/Clang, ELF platforms — Linux/ESP32).
  *
+ * pdr_play returns a raw signed 16-bit PCM sample as int. Divide by 32768.0
+ * to obtain a normalised float in [-1, 1] for further DSP.
+ *
  * Usage in FAUST:
  *
- *   pdr_play = ffunction(float pdr_play(int, int, int), <pdr.h>, "");
+ *   pdr_play = ffunction(int pdr_play(int, int, int), <pdr.h>, "");
  *   tick     = +(1) ~ _;
- *   kick     = pdr_play(0, button("kick") * (1 + nentry("kick_var", 0, 0, 3, 1)) : int, tick);
+ *   trig     = button("kick") * (1 + nentry("kick_var", 0, 0, 3, 1)) : int;
+ *   kick     = pdr_play(0, trig, tick) : float / 32768.0;
  *   process  = kick;
  *
  * Configuration syntax:
@@ -92,10 +96,10 @@ namespace
         uint32_t rcnt;      /* Rice adaptive count             */
         uint32_t total;     /* total samples in .pdr file      */
         uint32_t idx;       /* current output sample index     */
-        int nbits;          /* valid bits in buf               */
+        int nbits;               /* valid bits in buf               */
         int16_t prev1;      /* previous decoded sample         */
         int16_t prev2;      /* sample before that              */
-        int prev_trig;      /* last trigger value (edge detect)*/
+        int prev_trig;           /* last trigger value (edge detect)*/
     };
 
     PdrState pdr_state[PDR_MAX_VOICES] = {};
@@ -125,14 +129,18 @@ namespace
 
 /* --------------------------------------------------------------------------
  * pdr_play — FAUST entry point, external C linkage
+ *
+ * Returns a raw signed 16-bit PCM sample as int. FAUST usage:
+ *     pdr_play = ffunction(int pdr_play(int, int, int), <pdr.h>, "");
+ *     kick = pdr_play(0, trig, tick) : float / 32768.0;
  * --------------------------------------------------------------------------*/
 
-extern "C" inline float pdr_play(int voice, int trig, int tick)
+extern "C" inline int pdr_play(int voice, int trig, int tick)
 {
     static_cast<void>(tick);
 
     if (voice < 0 || voice >= PDR_MAX_VOICES)
-        return 0.0f;
+        return 0;
 
     auto &s = pdr_state[voice];
 
@@ -189,13 +197,13 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
 
     /* End of sample → silence. */
     if (s.idx >= s.total)
-        return 0.0f;
+        return 0;
 
     /* First two samples are stored verbatim in the header. */
     if (s.idx++ < 2)
     {
         const int16_t hdr = (s.idx == 1) ? s.prev2 : s.prev1;
-        return static_cast<float>(hdr) / 32768.0f;
+        return static_cast<int>(hdr);
     }
 
     /* Refill bit buffer. */
@@ -209,7 +217,7 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
     if (s.nbits <= 0 && s.ptr >= s.end)
     {
         s.idx = s.total;
-        return 0.0f;
+        return 0;
     }
 
     /* Rice decode: k from adaptive (rsum / rcnt). */
@@ -264,7 +272,7 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
         s.rcnt >>= 1;
     }
 
-    return static_cast<float>(out) / 32768.0f;
+    return out;
 }
 
 /* ==========================================================================
@@ -288,7 +296,7 @@ extern "C" inline float pdr_play(int voice, int trig, int tick)
             ".incbin \"" file "\"\n"                      \
             ".global " #name "_end\n" #name "_end:\n"     \
             ".previous\n");                               \
-    extern const uint8_t name##_start[];                  \
+    extern const uint8_t name##_start[];             \
     extern const uint8_t name##_end[]
 
 /* --------------------------------------------------------------------------
@@ -408,13 +416,13 @@ def read_wav(path):
     return pcm, n
 
 def encode(pcm24, bits=0):
-# `bits` controls the rounding - tolerance window:
-#bits = 0->1 candidate(lossless : exact truncation, no search)
-#bits = 1->3 candidates(-1, 0, +1)
-#bits = 2->5 candidates(-2 ..+ 2)
-#bits = 3->7 candidates(-3 ..+ 3)
-#Every extra bit doubles the search space(this *next) and increases
-#encoder runtime, in exchange for potentially better Rice - cost minima.
+    # `bits` controls the rounding-tolerance window:
+    #   bits=0 ->  1 candidate  (lossless: exact truncation, no search)
+    #   bits=1 ->  3 candidates (-1, 0, +1)
+    #   bits=2 ->  5 candidates (-2 .. +2)
+    #   bits=3 ->  7 candidates (-3 .. +3)
+    # Every extra bit doubles the search space (this * next) and increases
+    # encoder runtime, in exchange for potentially better Rice-cost minima.
     if bits < 0: bits = 0
     offsets = list(range(-bits, bits + 1))   # e.g. [-1, 0, 1] for bits=1
 
@@ -423,8 +431,8 @@ def encode(pcm24, bits=0):
     pcm[0] = max(-32768, min(32767, (pcm24[0] + 128) >> 8))
     if n > 1: pcm[1] = max(-32768, min(32767, (pcm24[1] + 128) >> 8))
 
-#Seed the Rice state from the first 256 truncated delta2 values so the
-#adaptive k at sample index 2 matches what Phase 2 would compute.
+    # Seed the Rice state from the first 256 truncated delta2 values so the
+    # adaptive k at sample index 2 matches what Phase 2 would compute.
     d2_seed = []
     prev1, prev2 = pcm[1] if n > 1 else 0, pcm[0]
     for i in range(2, min(n, 258)):
@@ -442,19 +450,19 @@ def encode(pcm24, bits=0):
         return q + 1 + k  # unary (q ones + terminator) + k remainder bits
 
     for i in range(2, n):
-#Candidate set : base + d for d in offsets, clipped to int16.Pick the
-#one whose actual Rice - bit cost, for THIS sample plus the best
-#achievable cost of the NEXT sample, is minimal.Rice state(A, N)
-#is evaluated at the current position.
+        # Candidate set: base + d for d in offsets, clipped to int16. Pick the
+        # one whose actual Rice-bit cost, for THIS sample plus the best
+        # achievable cost of the NEXT sample, is minimal. Rice state (A, N)
+        # is evaluated at the current position.
         base = pcm24[i] >> 8
         cands = [max(-32768, min(32767, base + d)) for d in offsets]
 
         if i + 1 < n:
             next_base = pcm24[i+1] >> 8
             next_cands = [max(-32768, min(32767, next_base + d)) for d in offsets]
-#Tie - break order : 0 first, then outward(+1, -1, +2, -2, ...),
-#so ties favour the truncate base and larger deviations stay
-#last resort.
+            # Tie-break order: 0 first, then outward (+1, -1, +2, -2, ...),
+            # so ties favour the truncate base and larger deviations stay
+            # last resort.
             order = sorted(range(len(offsets)), key=lambda j: (abs(offsets[j]), -offsets[j]))
             best_cost = None
             best_c = cands[offsets.index(0)]
@@ -463,7 +471,7 @@ def encode(pcm24, bits=0):
                 d2_here = ((c - 2*pcm[i-1] + pcm[i-2] + 32768) % 65536) - 32768
                 zz_here = zigzag(d2_here)
                 bits_here = rice_bits(zz_here, A, N)
-#Advance Rice state one step to evaluate the next sample
+                # Advance Rice state one step to evaluate the next sample
                 A_next, N_next = A + zz_here, N + 1
                 if N_next > 64: A_next >>= 1; N_next >>= 1
                 bits_next = min(
@@ -488,7 +496,7 @@ def encode(pcm24, bits=0):
                     best_c = c
             pcm[i] = best_c
 
-#Advance Rice state with the chosen sample
+        # Advance Rice state with the chosen sample
         z_chosen = zigzag(((pcm[i] - 2*pcm[i-1] + pcm[i-2] + 32768) % 65536) - 32768)
         A += z_chosen; N += 1
         if N > 64: A >>= 1; N >>= 1
