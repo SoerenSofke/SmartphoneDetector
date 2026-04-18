@@ -374,7 +374,7 @@ PDR_CONFIG;
 #if 0
 "x"""
 
-import sys, os, re, struct, wave, math
+import sys, os, struct, wave, math
 
 def zigzag(v):
     return (v << 1) ^ (v >> 31) if v >= 0 else ((-v - 1) << 1 | 1)
@@ -452,28 +452,15 @@ def encode(pcm24):
     hdr = b'PDR' + struct.pack('<BI2h', sk, n, pcm[0], pcm[1])
     return hdr + bytes(data)
 
-def sanitize(name):
-    name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
-    if not name or name[0].isdigit(): name = '_' + name
-    return name
-
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         print(f'usage: python3 {sys.argv[0]} input.wav')
         sys.exit(1)
     wav_path = sys.argv[1]
-    name = sanitize(os.path.splitext(os.path.basename(wav_path))[0])
-    h_path = os.path.splitext(wav_path)[0] + '.h'
     pcm24, n = read_wav(wav_path)
     pdr = encode(pcm24)
-    with open(h_path, 'w') as f:
-        f.write(f'static const uint8_t {name}[] __attribute__((aligned(4))) = {{\n   ')
-        for i, b in enumerate(pdr):
-            f.write(f' 0x{b:02X}{"," if i+1<len(pdr) else ""}')
-            if (i+1) % 12 == 0 and i+1 < len(pdr): f.write('\n   ')
-        f.write(f'\n}}; /* {len(pdr)} bytes, {n} samples */\n')
     pdr_path = os.path.splitext(wav_path)[0] + '.pdr'
     with open(pdr_path, 'wb') as f:
         f.write(pdr)
-    print(f'{n} samples -> {len(pdr)} bytes ({n*2/len(pdr):.1f}x) -> {h_path}, {pdr_path}')
+    print(f'{n} samples -> {len(pdr)} bytes ({n*2/len(pdr):.1f}x) -> {pdr_path}')
 #endif
