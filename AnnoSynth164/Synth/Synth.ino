@@ -3,11 +3,6 @@
 #include "UsbMidi.h"
 
 #include "pdr.h"
-// #include "kick_3.h"
-// #include "snare_3.h"
-
-#include "incbin.h"
-INCBIN(drums, "audio/snare3.pdr", "audio/kick3.pdr", "audio/ride3.pdr", "audio/hihatClosed3.pdr");
 
 // ── Configuration ──────────────────────────────────────────
 namespace Config
@@ -37,9 +32,7 @@ static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
 
 static UsbMidi usbMidi;
 
-static pdr_t pdr_state = {0};
-
-static uint8_t drum_index = 0;
+static uint8_t voice_index = 0;
 
 // ── Helper functions ───────────────────────────────────────
 
@@ -56,10 +49,10 @@ static size_t fill_audio_block(int16_t *buf, uint16_t frames)
 
         if (trigger)
         {
-            drum_index = (drum_index + 1) % INCBIN_COUNT(drums);
+            voice_index = (voice_index + 1) % 4;
         }
 
-        const int16_t sample = pdr_decode(&pdr_state, drums[drum_index].data, trigger);
+        const int16_t sample = static_cast<int16_t>(lrintf(32768.0f * pdr_play(0, trigger ? voice_index+1 : 0, 0)));
         buf[i * 2] = sample;     // left
         buf[i * 2 + 1] = sample; // right
     }
