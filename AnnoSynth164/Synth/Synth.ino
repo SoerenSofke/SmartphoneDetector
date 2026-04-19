@@ -23,16 +23,22 @@ namespace Config
     constexpr size_t SAMPLES_PER_BLOCK = FRAMES_PER_BLOCK * 2; // stereo
 }
 
+// ── Types ──────────────────────────────────────────────────
+struct MidiEvent
+{
+    uint8_t channel;
+    uint8_t note;
+    uint8_t velocity;
+};
+
 // ── Global state ───────────────────────────────────────────
 
-static QueueHandle_t trigger_queue = nullptr;
+static QueueHandle_t midi_queue = nullptr;
 
 static I2SClass i2s;
 static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
 
 static UsbMidi usbMidi;
-
-static uint8_t voice_index = 0;
 
 // ── Helper functions ───────────────────────────────────────
 
@@ -42,19 +48,28 @@ static uint8_t voice_index = 0;
 /// @return       number of bytes written to the buffer
 static size_t fill_audio_block(int16_t *buf, uint16_t frames)
 {
+    constexpr uint8_t NUM_VOICES = 3;
+    constexpr uint8_t NO_TRIG = 0xFF;
+
     for (uint16_t i = 0; i < frames; ++i)
     {
-        bool trigger = false;
-        xQueueReceive(trigger_queue, &trigger, 0);
+        // Poll MIDI queue once per sample; map note to voice (note 24 = voice 0)
+        MidiEvent event;
+        const uint8_t trig_voice =
+            (xQueueReceive(midi_queue, &event, 0) == pdTRUE)
+                ? static_cast<uint8_t>(event.note - 24)
+                : NO_TRIG;
 
-        if (trigger)
-        {
-            voice_index = (voice_index + 1) % 4;
-        }
+        // Advance every voice and mix; only the triggered voice gets trig=1
+        int32_t mix = 0;
+        for (uint8_t v = 0; v < NUM_VOICES; ++v)
+            mix += pdr_play(v, v == trig_voice, 0);
 
-        const int16_t sample = static_cast<int16_t>(pdr_play(0, trigger ? voice_index+1 : 0, 0));
-        buf[i * 2] = sample;     // left
-        buf[i * 2 + 1] = sample; // right
+        // Divide by 2 for headroom; clamp as a last-resort safety net
+        mix = constrain(mix >> 1, INT16_MIN, INT16_MAX);
+
+        // Duplicate mono mix to both stereo channels
+        buf[2*i] = buf[2*i + 1] = static_cast<int16_t>(mix);
     }
 
     return static_cast<size_t>(frames) * 2 * sizeof(int16_t);
@@ -87,15 +102,15 @@ void tsprint(const char *msg)
 void onMidiMessage(const uint8_t (&data)[4])
 {
     uint8_t status = data[1] & 0xF0;
+    uint8_t channel = data[1] & 0x0F;
+    uint8_t note = data[2];
     uint8_t velocity = data[3];
 
     if (status == 0x90 && velocity > 0)
     {
-        bool trigger = true;
-        xQueueSendToBack(trigger_queue, &trigger, 0);
+        MidiEvent event = {channel, note, velocity};
+        xQueueSendToBack(midi_queue, &event, 0);
     }
-
-    tsprint("MIDI Message Received");
 }
 
 void onDeviceConnect()
@@ -115,7 +130,7 @@ void setup()
     Serial.begin(115200);
     delay(2000);
 
-    trigger_queue = xQueueCreate(Config::QUEUE_LENGTH, sizeof(bool));
+    midi_queue = xQueueCreate(Config::QUEUE_LENGTH, sizeof(MidiEvent));
 
     if (!init_i2s())
     {

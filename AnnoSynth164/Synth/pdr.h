@@ -44,18 +44,18 @@
  * USER CONFIGURATION — only section users need to edit
  * ==========================================================================*/
 
-#define PDR_CONFIG                                                                                    \
-    PDR_VOICE(0, "audio/kick3.pdr", "audio/snare3.pdr", "audio/ride3.pdr", "audio/hihatClosed3.pdr"); \
-    PDR_VOICE(1);                                                                                     \
-    PDR_VOICE(2);                                                                                     \
-    PDR_VOICE(3);                                                                                     \
-    PDR_VOICE(4);                                                                                     \
-    PDR_VOICE(5);                                                                                     \
-    PDR_VOICE(6);                                                                                     \
-    PDR_VOICE(7);                                                                                     \
-    PDR_VOICE(8);                                                                                     \
-    PDR_VOICE(9);                                                                                     \
-    PDR_VOICE(10);                                                                                    \
+#define PDR_CONFIG                          \
+    PDR_VOICE(0, "audio/kick3.pdr");        \
+    PDR_VOICE(1, "audio/snare3.pdr");       \
+    PDR_VOICE(2, "audio/ride3.pdr");        \
+    PDR_VOICE(3, "audio/hihatClosed3.pdr"); \
+    PDR_VOICE(4);                           \
+    PDR_VOICE(5);                           \
+    PDR_VOICE(6);                           \
+    PDR_VOICE(7);                           \
+    PDR_VOICE(8);                           \
+    PDR_VOICE(9);                           \
+    PDR_VOICE(10);                          \
     PDR_VOICE(11)
 
 /* ==========================================================================
@@ -96,10 +96,10 @@ namespace
         uint32_t rcnt;      /* Rice adaptive count             */
         uint32_t total;     /* total samples in .pdr file      */
         uint32_t idx;       /* current output sample index     */
-        int nbits;               /* valid bits in buf               */
+        int nbits;          /* valid bits in buf               */
         int16_t prev1;      /* previous decoded sample         */
         int16_t prev2;      /* sample before that              */
-        int prev_trig;           /* last trigger value (edge detect)*/
+        int prev_trig;      /* last trigger value (edge detect)*/
     };
 
     PdrState pdr_state[PDR_MAX_VOICES] = {};
@@ -296,7 +296,7 @@ extern "C" inline int pdr_play(int voice, int trig, int tick)
             ".incbin \"" file "\"\n"                      \
             ".global " #name "_end\n" #name "_end:\n"     \
             ".previous\n");                               \
-    extern const uint8_t name##_start[];             \
+    extern const uint8_t name##_start[];                  \
     extern const uint8_t name##_end[]
 
 /* --------------------------------------------------------------------------
