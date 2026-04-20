@@ -11,17 +11,17 @@
 // ── Configuration ──────────────────────────────────────────
 namespace Config
 {
-    // Queue parameters
-    constexpr size_t QUEUE_LENGTH = 16;
-
-    // Audio parameters
-    constexpr uint32_t SAMPLE_RATE = 48000;
-    constexpr uint16_t FRAMES_PER_BLOCK = 128;
-
     // I2S pin assignment (adjust to your board)
     constexpr int8_t PIN_BCLK = 5;
     constexpr int8_t PIN_WSEL = 6;
     constexpr int8_t PIN_DOUT = 7;
+
+    // MIDI queue parameters
+    constexpr size_t QUEUE_LENGTH = 16;
+
+    // Audio parameters
+    constexpr uint32_t SAMPLE_RATE = 48000;
+    constexpr uint16_t FRAMES_PER_BLOCK = 128;    
 
     // Derived constants (computed at compile time)
     constexpr size_t SAMPLES_PER_BLOCK = FRAMES_PER_BLOCK * 2; // stereo
@@ -201,12 +201,12 @@ void onMidiMessage(const uint8_t (&data)[4])
 
 void onDeviceConnect()
 {
-    tsprint("MIDI device connected");
+    tsprint("[info] MIDI device connected");
 }
 
 void onDeviceDisconnected()
 {
-    tsprint("MIDI device disconnected");
+    tsprint("[info] MIDI device disconnected");
 }
 
 // ── Task bodies ────────────────────────────────────────────
@@ -303,7 +303,7 @@ void setup()
     {
         tsprint("[ERROR] I2S initialization failed. "
                 "Check pin assignment and board selection.");
-        while (true)
+        for (;;)
         {
             delay(1000);
         }
@@ -342,7 +342,7 @@ void setup()
         }
     }
 
-    tsprint("Tasks started: audio@Core1(prio 10), midi@Core0(prio 5), "
+    tsprint("[info] Tasks started: audio@Core1(prio 10), midi@Core0(prio 5), "
             "stats@Core0(prio 1)");
 
     // The Arduino loopTask (this context) has nothing left to do.
