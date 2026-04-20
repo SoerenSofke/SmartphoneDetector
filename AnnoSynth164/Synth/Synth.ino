@@ -45,7 +45,7 @@ namespace Config
     //     threatening the audio task should affinity slip.
     //
     //   Core 0 (PRO_CPU) — Stats task, low priority
-    //     Periodically prints peak/avg CPU load published by the
+    //     Periodically prints the peak CPU load published by the
     //     audio task. Low priority (1) ensures it never preempts
     //     MIDI, and its Serial output stays off the audio core
     //     entirely so UART I/O can never delay real-time work.
@@ -90,20 +90,16 @@ static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
 
 static UsbMidi usbMidi;
 
-// Audio-task CPU-load stats, published to the stats task on Core 0.
-// Three separate uint32_t atomics rather than a packed uint64_t because
-// std::atomic<uint64_t> is not natively lock-free on 32-bit Xtensa and
-// would pull in libatomic, which isn't linked under Arduino-ESP32.
+// Audio-task peak CPU load, published to the stats task on Core 0.
 // Writer: audio_task (single producer). Reader: stats_task (exchange(0)
-// to read-and-reset). The three fields are not mutually atomic, so a
-// block's contribution may split across two reporting windows — this
-// distorts avg by at most 1/N per window (<0.3 % at 376 blocks/s) and
-// defers any peak spike by at most one window (never lost).
+// to read-and-reset). The writer's load-modify-store is not atomic as
+// a whole, but the only race is with the reader's exchange: a peak
+// spike that loses this race ends up in the next reporting window
+// (deferred, never lost). Relaxed ordering suffices — this atomic
+// doesn't guard any other data.
 namespace stats
 {
     static std::atomic<uint32_t> peak_us{0};
-    static std::atomic<uint32_t> sum_us{0};
-    static std::atomic<uint32_t> count{0};
 }
 
 // ── Helper functions ───────────────────────────────────────
@@ -220,7 +216,7 @@ void onDeviceDisconnected()
 //   A single block has a fixed wall-clock budget of FRAMES / SAMPLE_RATE
 //   seconds (here: 128/48000 = 2667 µs). We measure how much of that
 //   budget is spent in fill_audio_block() — the rest is slack time
-//   waiting in i2s.write(). Per-block stats are published to the stats
+//   waiting in i2s.write(). The running peak is published to the stats
 //   namespace; the stats_task handles formatting and Serial output so
 //   that UART I/O can never delay this task.
 static IRAM_ATTR void audio_task(void * /*pv*/)
@@ -232,18 +228,14 @@ static IRAM_ATTR void audio_task(void * /*pv*/)
                                               Config::FRAMES_PER_BLOCK);
         const uint32_t compute_us = micros() - t0;
 
-        // Single-writer atomic updates. Each individual atomic op is
-        // lock-free on Xtensa via S32C1I. The *sequence* of ops is not
-        // atomic w.r.t. the stats_task's three exchange(0) calls — the
-        // races are benign: a peak spike may be deferred by one window
-        // (never lost), and a block's sum/count may split across windows
-        // (distorting avg by at most 1/N per window). Relaxed ordering
-        // suffices — these atomics don't guard any other data.
+        // Single-writer atomic update. The load-modify-store is not
+        // atomic as a whole, but the only race is with stats_task's
+        // exchange(0), which reads and resets in one step — a peak
+        // spike that loses this race ends up in the next reporting
+        // window (deferred, never lost). Relaxed ordering suffices.
         const uint32_t cur_peak = stats::peak_us.load(std::memory_order_relaxed);
         if (compute_us > cur_peak)
             stats::peak_us.store(compute_us, std::memory_order_relaxed);
-        stats::sum_us.fetch_add(compute_us, std::memory_order_relaxed);
-        stats::count.fetch_add(1, std::memory_order_relaxed);
 
         i2s.write(reinterpret_cast<uint8_t *>(audio_buffer), bytes);
     }
@@ -262,7 +254,7 @@ static void midi_task(void * /*pv*/)
     }
 }
 
-// Stats task — prints the audio-task CPU load once per second.
+// Stats task — prints the audio-task peak CPU load once per second.
 // Runs on Core 0 at low priority, so neither MIDI nor Audio can be
 // delayed by Serial output.
 static void stats_task(void * /*pv*/)
@@ -275,20 +267,14 @@ static void stats_task(void * /*pv*/)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));
 
-        // Atomic read-and-reset. The three exchanges are independent,
-        // so the audio task may write between them — acceptable since
-        // any spike merely shifts to the next window's report.
+        // Atomic read-and-reset in a single operation.
         const uint32_t peak = stats::peak_us.exchange(0, std::memory_order_relaxed);
-        const uint32_t sum = stats::sum_us.exchange(0, std::memory_order_relaxed);
-        const uint32_t count = stats::count.exchange(0, std::memory_order_relaxed);
 
-        if (count == 0)
+        if (peak == 0)
             continue; // audio task hasn't produced any blocks yet
 
-        const float avg_pct = 100.0f * sum / (count * BLOCK_US);
         const float peak_pct = 100.0f * peak / BLOCK_US;
-        tsprint("[audio] load: avg %5.1f%%  peak %5.1f%%",
-                avg_pct, peak_pct);
+        tsprint("[audio] load: peak %5.1f%%", peak_pct);
     }
 }
 
