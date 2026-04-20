@@ -1,7 +1,6 @@
-#include <freertos/queue.h>
 #include <ESP_I2S.h>
 #include "UsbMidi.h"
-
+#include "AtomicQueue.h"
 #include "pdr.h"
 
 // ── Configuration ──────────────────────────────────────────
@@ -33,7 +32,7 @@ struct MidiEvent
 
 // ── Global state ───────────────────────────────────────────
 
-static QueueHandle_t midi_queue = nullptr;
+static AtomicQueue<MidiEvent, Config::QUEUE_LENGTH> midi_queue;
 
 static I2SClass i2s;
 static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
@@ -48,7 +47,7 @@ static UsbMidi usbMidi;
 /// @return       number of bytes written to the buffer
 static size_t fill_audio_block(int16_t *buf, uint16_t frames)
 {
-    constexpr uint8_t NUM_VOICES = 3;
+    constexpr uint8_t NUM_VOICES = 8;
     constexpr uint8_t NO_TRIG = 0xFF;
 
     for (uint16_t i = 0; i < frames; ++i)
@@ -56,7 +55,7 @@ static size_t fill_audio_block(int16_t *buf, uint16_t frames)
         // Poll MIDI queue once per sample; map note to voice (note 24 = voice 0)
         MidiEvent event;
         const uint8_t trig_voice =
-            (xQueueReceive(midi_queue, &event, 0) == pdTRUE)
+            midi_queue.pop(event)
                 ? static_cast<uint8_t>(event.note - 24)
                 : NO_TRIG;
 
@@ -66,10 +65,10 @@ static size_t fill_audio_block(int16_t *buf, uint16_t frames)
             mix += pdr_play(v, v == trig_voice, 0);
 
         // Divide by 2 for headroom; clamp as a last-resort safety net
-        mix = constrain(mix >> 1, INT16_MIN, INT16_MAX);
+        mix = constrain(mix >> 2, INT16_MIN, INT16_MAX);
 
         // Duplicate mono mix to both stereo channels
-        buf[2*i] = buf[2*i + 1] = static_cast<int16_t>(mix);
+        buf[2 * i] = buf[2 * i + 1] = static_cast<int16_t>(mix);
     }
 
     return static_cast<size_t>(frames) * 2 * sizeof(int16_t);
@@ -109,7 +108,7 @@ void onMidiMessage(const uint8_t (&data)[4])
     if (status == 0x90 && velocity > 0)
     {
         MidiEvent event = {channel, note, velocity};
-        xQueueSendToBack(midi_queue, &event, 0);
+        midi_queue.push(event);
     }
 }
 
@@ -129,8 +128,6 @@ void setup()
 {
     Serial.begin(115200);
     delay(2000);
-
-    midi_queue = xQueueCreate(Config::QUEUE_LENGTH, sizeof(MidiEvent));
 
     if (!init_i2s())
     {
