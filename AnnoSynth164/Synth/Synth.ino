@@ -80,7 +80,12 @@ static UsbMidi usbMidi;
 /// @param buf    destination buffer (stereo, interleaved L/R)
 /// @param frames number of stereo frames to generate
 /// @return       number of bytes written to the buffer
-static size_t fill_audio_block(int16_t *buf, uint16_t frames)
+///
+/// IRAM_ATTR: Place this function (and, via always_inline, the entire
+/// inlined pdr_play body that lives inside it) in internal IRAM rather
+/// than flash. This removes flash cache-miss latency from the hot loop —
+/// relevant mainly after cold starts and on any cache eviction event.
+static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
 {
     constexpr uint8_t NUM_VOICES = 12;
     constexpr uint8_t NO_TRIG = 0xFF;
@@ -178,7 +183,7 @@ void onDeviceDisconnected()
 ///   waiting in i2s.write(). Peak and average over each 1 s window are
 ///   printed to Serial. Peak is the number to watch: if it approaches
 ///   100 %, an audio glitch is imminent.
-static void audio_task(void * /*pv*/)
+static IRAM_ATTR void audio_task(void * /*pv*/)
 {
     constexpr uint32_t BLOCK_US =
         static_cast<uint32_t>(Config::FRAMES_PER_BLOCK) * 1000000UL /

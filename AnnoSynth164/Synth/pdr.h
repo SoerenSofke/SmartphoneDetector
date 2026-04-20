@@ -29,6 +29,7 @@
 
 #ifndef PDR_H
 #define PDR_H
+#pragma GCC optimize ("O3")
 
 #ifndef __cplusplus
 #error "pdr.h requires C++."
@@ -125,31 +126,12 @@ namespace
         break;                                         \
     }
 
-} // anonymous namespace
-
-/* --------------------------------------------------------------------------
- * pdr_play — FAUST entry point, external C linkage
- *
- * Returns a raw signed 16-bit PCM sample as int. FAUST usage:
- *     pdr_play = ffunction(int pdr_play(int, int, int), <pdr.h>, "");
- *     kick = pdr_play(0, trig, tick) : float / 32768.0;
- * --------------------------------------------------------------------------*/
-
-extern "C" inline int pdr_play(int voice, int trig, int tick)
-{
-    static_cast<void>(tick);
-
-    if (voice < 0 || voice >= PDR_MAX_VOICES)
-        return 0;
-
-    auto &s = pdr_state[voice];
-
-    /* Rising edge detection → retrigger with encoded variation.
-     * `prev <= 0` (not `== 0`) protects against negative trigger values. */
-    const bool retrig = (trig > 0) && (s.prev_trig <= 0);
-    s.prev_trig = trig;
-
-    if (retrig)
+    /* Retrigger helper — intentionally out-of-line (noinline) so that
+     * pdr_play's hot path stays small enough for the compiler to inline
+     * at every call site in the mix loop. The 12-case switch lives here
+     * exactly once in the binary, not 12 times at the inlined sites. */
+    __attribute__((noinline))
+    static void pdr_retrigger(int voice, int trig, PdrState &s)
     {
         const uint8_t *vdata = nullptr;
         const uint8_t *vend = nullptr;
@@ -174,14 +156,16 @@ extern "C" inline int pdr_play(int voice, int trig, int tick)
                 break;
             }
 
-        if (vdata && vend > vdata && static_cast<size_t>(vend - vdata) >= 12 && vdata[0] == 'P' && vdata[1] == 'D' && vdata[2] == 'R')
+        if (vdata && vend > vdata && static_cast<size_t>(vend - vdata) >= 12 &&
+            vdata[0] == 'P' && vdata[1] == 'D' && vdata[2] == 'R')
         {
             /* Cap seed to 30 to prevent overflow in (2u << seed). */
             uint8_t seed = vdata[3];
             if (seed > 30)
                 seed = 30;
 
-            s.total = static_cast<uint32_t>(vdata[4]) | (static_cast<uint32_t>(vdata[5]) << 8) | (static_cast<uint32_t>(vdata[6]) << 16) | (static_cast<uint32_t>(vdata[7]) << 24);
+            s.total = static_cast<uint32_t>(vdata[4]) | (static_cast<uint32_t>(vdata[5]) << 8) |
+                      (static_cast<uint32_t>(vdata[6]) << 16) | (static_cast<uint32_t>(vdata[7]) << 24);
             s.prev2 = static_cast<int16_t>(vdata[8] | (vdata[9] << 8));
             s.prev1 = static_cast<int16_t>(vdata[10] | (vdata[11] << 8));
             s.idx = 0;
@@ -194,6 +178,35 @@ extern "C" inline int pdr_play(int voice, int trig, int tick)
         }
         /* invalid / empty / bad magic → no re-init, continue current playback */
     }
+
+} // anonymous namespace
+
+/* --------------------------------------------------------------------------
+ * pdr_play — FAUST entry point, external C linkage
+ *
+ * Returns a raw signed 16-bit PCM sample as int. FAUST usage:
+ *     pdr_play = ffunction(int pdr_play(int, int, int), <pdr.h>, "");
+ *     kick = pdr_play(0, trig, tick) : float / 32768.0;
+ * --------------------------------------------------------------------------*/
+
+extern "C" inline __attribute__((always_inline)) int pdr_play(int voice, int trig, int tick)
+{
+    static_cast<void>(tick);
+
+    if (voice < 0 || voice >= PDR_MAX_VOICES)
+        return 0;
+
+    auto &s = pdr_state[voice];
+
+    /* Rising edge detection → retrigger with encoded variation.
+     * `prev <= 0` (not `== 0`) protects against negative trigger values.
+     * The retrigger path itself is out-of-line (see pdr_retrigger above)
+     * so this function stays small enough to be inlined at every call. */
+    const bool retrig = (trig > 0) && (s.prev_trig <= 0);
+    s.prev_trig = trig;
+
+    if (__builtin_expect(retrig, 0))
+        pdr_retrigger(voice, trig, s);
 
     /* End of sample → silence. */
     if (s.idx >= s.total)
@@ -225,22 +238,51 @@ extern "C" inline int pdr_play(int voice, int trig, int tick)
     while (k < 31 && (s.rcnt << (k + 1)) <= s.rsum)
         k++;
 
-    /* Unary quotient. */
-    int q = 0;
-    while ((s.buf >> 31) & 1)
+    /* Unary quotient — count leading 1-bits via CLZ fast path.
+     *
+     * Bit layout: valid data is MSB-aligned, bits below nbits are always
+     * 0 (established by the refill/shift invariant). So ~buf has 1s below
+     * nbits, and __builtin_clz(~buf) counts leading 1s of buf, bounded
+     * above by nbits. If that count reaches nbits (terminator not yet in
+     * the buffer) or if buf is fully saturated with 1s (~buf == 0, clz UB),
+     * we fall back to the bit-by-bit loop, which also handles mid-code
+     * refills. In practice the fast path is taken ~always: q is typically
+     * small (1..10) for natural audio, nbits is 25..32 after the refill
+     * above. */
+    int q;
+    const uint32_t inverted = ~s.buf;
+    const int leading_ones = inverted ? __builtin_clz(inverted) : 32;
+
+    if (leading_ones < s.nbits)
     {
+        /* Fast path: terminator 0 is within the current buffer. */
+        q = leading_ones;
+        /* Two shifts to avoid the undefined-behavior shift-by-32 when
+         * q == 31 and nbits == 32 (q + 1 would be 32). */
+        s.buf <<= q;
+        s.buf <<= 1;
+        s.nbits -= (q + 1);
+    }
+    else
+    {
+        /* Slow fallback: terminator is beyond current valid bits, or buf
+         * is all 1s. Walk bit by bit with inline refills. */
+        q = 0;
+        while ((s.buf >> 31) & 1)
+        {
+            s.buf <<= 1;
+            s.nbits--;
+            q++;
+            if (s.nbits < 8)
+                while (s.nbits <= 24 && s.ptr < s.end)
+                {
+                    s.buf |= static_cast<uint32_t>(*s.ptr++) << (24 - s.nbits);
+                    s.nbits += 8;
+                }
+        }
         s.buf <<= 1;
         s.nbits--;
-        q++;
-        if (s.nbits < 8)
-            while (s.nbits <= 24 && s.ptr < s.end)
-            {
-                s.buf |= static_cast<uint32_t>(*s.ptr++) << (24 - s.nbits);
-                s.nbits += 8;
-            }
     }
-    s.buf <<= 1;
-    s.nbits--;
 
     /* k binary remainder bits. */
     uint32_t code = static_cast<uint32_t>(q);
