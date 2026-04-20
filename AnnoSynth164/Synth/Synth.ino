@@ -1,3 +1,8 @@
+#pragma GCC optimize("O3")
+
+#include <atomic>
+#include <cstdarg>
+
 #include <ESP_I2S.h>
 #include "UsbMidi.h"
 #include "AtomicQueue.h"
@@ -23,7 +28,7 @@ namespace Config
 
     // ── Task configuration ──────────────────────────────────
     //
-    // Two explicit FreeRTOS tasks, pinned to separate cores.
+    // Three explicit FreeRTOS tasks, pinned to separate cores.
     //
     //   Core 1 (APP_CPU) — Audio task, high priority
     //     On ESP32-S3 Core 1 is traditionally free of WiFi/BT/USB
@@ -39,19 +44,30 @@ namespace Config
     //     so priority 5 keeps the task responsive without ever
     //     threatening the audio task should affinity slip.
     //
-    // The strict priority gap (10 vs 5) guarantees that even if
-    // both tasks ended up on the same core for any reason, audio
-    // would always preempt MIDI, never the other way round.
+    //   Core 0 (PRO_CPU) — Stats task, low priority
+    //     Periodically prints peak/avg CPU load published by the
+    //     audio task. Low priority (1) ensures it never preempts
+    //     MIDI, and its Serial output stays off the audio core
+    //     entirely so UART I/O can never delay real-time work.
+    //
+    // The strict priority gap (Audio 10 > MIDI 5 > Stats 1)
+    // guarantees that even if tasks ended up on the same core,
+    // audio always preempts MIDI, MIDI always preempts Stats.
     constexpr UBaseType_t AUDIO_TASK_PRIORITY = 10;
-    constexpr uint32_t    AUDIO_TASK_STACK    = 8192;
-    constexpr BaseType_t  AUDIO_TASK_CORE     = 1;
+    constexpr uint32_t AUDIO_TASK_STACK = 8192;
+    constexpr BaseType_t AUDIO_TASK_CORE = 1;
 
-    constexpr UBaseType_t MIDI_TASK_PRIORITY  = 5;
-    constexpr uint32_t    MIDI_TASK_STACK     = 4096;
-    constexpr BaseType_t  MIDI_TASK_CORE      = 0;
+    constexpr UBaseType_t MIDI_TASK_PRIORITY = 5;
+    constexpr uint32_t MIDI_TASK_STACK = 4096;
+    constexpr BaseType_t MIDI_TASK_CORE = 0;
+
+    constexpr UBaseType_t STATS_TASK_PRIORITY = 1;
+    constexpr uint32_t STATS_TASK_STACK = 4096;
+    constexpr BaseType_t STATS_TASK_CORE = 0;
 }
 
 // ── Types ──────────────────────────────────────────────────
+
 struct MidiEvent
 {
     uint8_t channel;
@@ -74,17 +90,52 @@ static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
 
 static UsbMidi usbMidi;
 
+// Audio-task CPU-load stats, published to the stats task on Core 0.
+// Three separate uint32_t atomics rather than a packed uint64_t because
+// std::atomic<uint64_t> is not natively lock-free on 32-bit Xtensa and
+// would pull in libatomic, which isn't linked under Arduino-ESP32.
+// Writer: audio_task (single producer). Reader: stats_task (exchange(0)
+// to read-and-reset). The three fields are not mutually atomic, so a
+// block's contribution may split across two reporting windows — this
+// distorts avg by at most 1/N per window (<0.3 % at 376 blocks/s) and
+// defers any peak spike by at most one window (never lost).
+namespace stats
+{
+    static std::atomic<uint32_t> peak_us{0};
+    static std::atomic<uint32_t> sum_us{0};
+    static std::atomic<uint32_t> count{0};
+}
+
 // ── Helper functions ───────────────────────────────────────
 
-/// Fills the audio buffer.
-/// @param buf    destination buffer (stereo, interleaved L/R)
-/// @param frames number of stereo frames to generate
-/// @return       number of bytes written to the buffer
-///
-/// IRAM_ATTR: Place this function (and, via always_inline, the entire
-/// inlined pdr_play body that lives inside it) in internal IRAM rather
-/// than flash. This removes flash cache-miss latency from the hot loop —
-/// relevant mainly after cold starts and on any cache eviction event.
+// Serial output with a [HH:MM:SS.mmm] timestamp prefix, printf-style.
+// All Serial output in this sketch goes through here so the log is
+// uniformly timestamped and single-sourced.
+__attribute__((format(printf, 1, 2))) static void tsprint(const char *fmt, ...)
+{
+    char buf[128];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    const unsigned long ms = millis();
+    const unsigned long s = ms / 1000;
+    const unsigned long m = s / 60;
+    const unsigned long h = m / 60;
+    Serial.printf("[%02lu:%02lu:%02lu.%03lu] %s\r\n",
+                  h % 100, m % 60, s % 60, ms % 1000, buf);
+}
+
+// Fills the audio buffer.
+//   buf    destination buffer (stereo, interleaved L/R)
+//   frames number of stereo frames to generate
+// Returns the number of bytes written to the buffer.
+//
+// IRAM_ATTR: places this function (and, via always_inline, the entire
+// inlined pdr_play body that lives inside it) in internal IRAM rather
+// than flash. Removes flash cache-miss latency from the hot loop —
+// relevant mainly after cold starts and on any cache eviction event.
 static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
 {
     constexpr uint8_t NUM_VOICES = 12;
@@ -92,30 +143,29 @@ static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
 
     for (uint16_t i = 0; i < frames; ++i)
     {
-        // Poll MIDI queue once per sample; map note to voice (note 24 = voice 0)
+        // Poll MIDI queue once per sample; map note to voice (note 24 = voice 0).
         MidiEvent event;
         const uint8_t trig_voice =
             midi_queue.pop(event)
                 ? static_cast<uint8_t>(event.note - 24)
                 : NO_TRIG;
 
-        // Advance every voice and mix; only the triggered voice gets trig=1
+        // Advance every voice and mix; only the triggered voice gets trig=1.
         int32_t mix = 0;
         for (uint8_t v = 0; v < NUM_VOICES; ++v)
             mix += pdr_play(v, v == trig_voice, 0);
 
-        // Divide by 4 for headroom; clamp as a last-resort safety net
+        // Divide by 4 for headroom; clamp as a last-resort safety net.
         mix = constrain(mix >> 2, INT16_MIN, INT16_MAX);
 
-        // Duplicate mono mix to both stereo channels
+        // Duplicate mono mix to both stereo channels.
         buf[2 * i] = buf[2 * i + 1] = static_cast<int16_t>(mix);
     }
 
     return static_cast<size_t>(frames) * 2 * sizeof(int16_t);
 }
 
-/// Initializes the I2S peripheral.
-/// @return true on success
+// Initializes the I2S peripheral. Returns true on success.
 static bool init_i2s()
 {
     i2s.setPins(Config::PIN_BCLK, Config::PIN_WSEL, Config::PIN_DOUT);
@@ -126,16 +176,6 @@ static bool init_i2s()
                      I2S_SLOT_MODE_STEREO);
 }
 
-void tsprint(const char *msg)
-{
-    unsigned long ms = millis();
-    unsigned long s = ms / 1000;
-    unsigned long m = s / 60;
-    unsigned long h = m / 60;
-    Serial.printf("[%02lu:%02lu:%02lu.%03lu] %s\r\n",
-                  h % 100, m % 60, s % 60, ms % 1000, msg);
-}
-
 // ── MIDI callbacks ─────────────────────────────────────────
 //
 // Invoked from the MIDI task context during usbMidi.update().
@@ -144,10 +184,10 @@ void tsprint(const char *msg)
 
 void onMidiMessage(const uint8_t (&data)[4])
 {
-    uint8_t status = data[1] & 0xF0;
-    uint8_t channel = data[1] & 0x0F;
-    uint8_t note = data[2];
-    uint8_t velocity = data[3];
+    const uint8_t status = data[1] & 0xF0;
+    const uint8_t channel = data[1] & 0x0F;
+    const uint8_t note = data[2];
+    const uint8_t velocity = data[3];
 
     if (status == 0x90 && velocity > 0)
     {
@@ -161,39 +201,30 @@ void onMidiMessage(const uint8_t (&data)[4])
 
 void onDeviceConnect()
 {
-    tsprint("MIDI Device Connected");
+    tsprint("MIDI device connected");
 }
 
 void onDeviceDisconnected()
 {
-    tsprint("MIDI Device Disconnected");
+    tsprint("MIDI device disconnected");
 }
 
 // ── Task bodies ────────────────────────────────────────────
 
-/// Audio task — drains the MIDI queue and feeds I2S.
-/// Pacing is provided implicitly by i2s.write(), which blocks until
-/// the DMA has room. That blocking yields back to the scheduler, so
-/// the task watchdog stays happy without a manual vTaskDelay.
-///
-/// CPU-load metric:
-///   A single block has a fixed wall-clock budget of FRAMES / SAMPLE_RATE
-///   seconds (here: 128/48000 = 2667 µs). We measure how much of that
-///   budget is spent in fill_audio_block() — the rest is slack time
-///   waiting in i2s.write(). Peak and average over each 1 s window are
-///   printed to Serial. Peak is the number to watch: if it approaches
-///   100 %, an audio glitch is imminent.
+// Audio task — drains the MIDI queue and feeds I2S.
+// Pacing is provided implicitly by i2s.write(), which blocks until the
+// DMA has room. That blocking yields back to the scheduler, so the task
+// watchdog stays happy without a manual vTaskDelay.
+//
+// CPU-load metric:
+//   A single block has a fixed wall-clock budget of FRAMES / SAMPLE_RATE
+//   seconds (here: 128/48000 = 2667 µs). We measure how much of that
+//   budget is spent in fill_audio_block() — the rest is slack time
+//   waiting in i2s.write(). Per-block stats are published to the stats
+//   namespace; the stats_task handles formatting and Serial output so
+//   that UART I/O can never delay this task.
 static IRAM_ATTR void audio_task(void * /*pv*/)
 {
-    constexpr uint32_t BLOCK_US =
-        static_cast<uint32_t>(Config::FRAMES_PER_BLOCK) * 1000000UL /
-        Config::SAMPLE_RATE;
-
-    uint32_t peak_us        = 0;
-    uint32_t sum_us         = 0;
-    uint32_t count          = 0;
-    uint32_t last_report_ms = millis();
-
     for (;;)
     {
         const uint32_t t0 = micros();
@@ -201,37 +232,63 @@ static IRAM_ATTR void audio_task(void * /*pv*/)
                                               Config::FRAMES_PER_BLOCK);
         const uint32_t compute_us = micros() - t0;
 
-        if (compute_us > peak_us) peak_us = compute_us;
-        sum_us += compute_us;
-        ++count;
+        // Single-writer atomic updates. Each individual atomic op is
+        // lock-free on Xtensa via S32C1I. The *sequence* of ops is not
+        // atomic w.r.t. the stats_task's three exchange(0) calls — the
+        // races are benign: a peak spike may be deferred by one window
+        // (never lost), and a block's sum/count may split across windows
+        // (distorting avg by at most 1/N per window). Relaxed ordering
+        // suffices — these atomics don't guard any other data.
+        const uint32_t cur_peak = stats::peak_us.load(std::memory_order_relaxed);
+        if (compute_us > cur_peak)
+            stats::peak_us.store(compute_us, std::memory_order_relaxed);
+        stats::sum_us.fetch_add(compute_us, std::memory_order_relaxed);
+        stats::count.fetch_add(1, std::memory_order_relaxed);
 
         i2s.write(reinterpret_cast<uint8_t *>(audio_buffer), bytes);
-
-        const uint32_t now_ms = millis();
-        if (now_ms - last_report_ms >= 1000)
-        {
-            const float avg_pct  = 100.0f * sum_us  / (count * BLOCK_US);
-            const float peak_pct = 100.0f * peak_us / BLOCK_US;
-            Serial.printf("[audio] load: avg %5.1f%%  peak %5.1f%%\r\n",
-                          avg_pct, peak_pct);
-            peak_us = 0;
-            sum_us  = 0;
-            count   = 0;
-            last_report_ms = now_ms;
-        }
     }
 }
 
-/// MIDI task — polls the USB stack and forwards events into the queue.
-/// A 1 ms yield matches the USB full-speed frame rate, keeps Core 0
-/// available for USB's own internal work, and satisfies the task
-/// watchdog.
+// MIDI task — polls the USB stack and forwards events into the queue.
+// A 1 ms yield matches the USB full-speed frame rate, keeps Core 0
+// available for USB's own internal work, and satisfies the task
+// watchdog.
 static void midi_task(void * /*pv*/)
 {
     for (;;)
     {
         usbMidi.update();
         vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
+// Stats task — prints the audio-task CPU load once per second.
+// Runs on Core 0 at low priority, so neither MIDI nor Audio can be
+// delayed by Serial output.
+static void stats_task(void * /*pv*/)
+{
+    constexpr uint32_t BLOCK_US =
+        static_cast<uint32_t>(Config::FRAMES_PER_BLOCK) * 1000000UL /
+        Config::SAMPLE_RATE;
+
+    for (;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // Atomic read-and-reset. The three exchanges are independent,
+        // so the audio task may write between them — acceptable since
+        // any spike merely shifts to the next window's report.
+        const uint32_t peak = stats::peak_us.exchange(0, std::memory_order_relaxed);
+        const uint32_t sum = stats::sum_us.exchange(0, std::memory_order_relaxed);
+        const uint32_t count = stats::count.exchange(0, std::memory_order_relaxed);
+
+        if (count == 0)
+            continue; // audio task hasn't produced any blocks yet
+
+        const float avg_pct = 100.0f * sum / (count * BLOCK_US);
+        const float peak_pct = 100.0f * peak / BLOCK_US;
+        tsprint("[audio] load: avg %5.1f%%  peak %5.1f%%",
+                avg_pct, peak_pct);
     }
 }
 
@@ -244,8 +301,8 @@ void setup()
 
     if (!init_i2s())
     {
-        Serial.println("[ERROR] I2S initialization failed.");
-        Serial.println("        Check pin assignment and board selection.");
+        tsprint("[ERROR] I2S initialization failed. "
+                "Check pin assignment and board selection.");
         while (true)
         {
             delay(1000);
@@ -270,16 +327,23 @@ void setup()
         Config::MIDI_TASK_PRIORITY, nullptr,
         Config::MIDI_TASK_CORE);
 
-    if (audio_ok != pdPASS || midi_ok != pdPASS)
+    const BaseType_t stats_ok = xTaskCreatePinnedToCore(
+        stats_task, "stats",
+        Config::STATS_TASK_STACK, nullptr,
+        Config::STATS_TASK_PRIORITY, nullptr,
+        Config::STATS_TASK_CORE);
+
+    if (audio_ok != pdPASS || midi_ok != pdPASS || stats_ok != pdPASS)
     {
-        Serial.println("[ERROR] Failed to create real-time tasks.");
+        tsprint("[ERROR] Failed to create real-time tasks.");
         while (true)
         {
             delay(1000);
         }
     }
 
-    tsprint("Tasks started: audio@Core1(prio 10), midi@Core0(prio 5)");
+    tsprint("Tasks started: audio@Core1(prio 10), midi@Core0(prio 5), "
+            "stats@Core0(prio 1)");
 
     // The Arduino loopTask (this context) has nothing left to do.
     // Delete it so we don't consume a scheduling slot on Core 1 for
