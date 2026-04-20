@@ -170,13 +170,50 @@ void onDeviceDisconnected()
 /// Pacing is provided implicitly by i2s.write(), which blocks until
 /// the DMA has room. That blocking yields back to the scheduler, so
 /// the task watchdog stays happy without a manual vTaskDelay.
+///
+/// CPU-load metric:
+///   A single block has a fixed wall-clock budget of FRAMES / SAMPLE_RATE
+///   seconds (here: 128/48000 = 2667 µs). We measure how much of that
+///   budget is spent in fill_audio_block() — the rest is slack time
+///   waiting in i2s.write(). Peak and average over each 1 s window are
+///   printed to Serial. Peak is the number to watch: if it approaches
+///   100 %, an audio glitch is imminent.
 static void audio_task(void * /*pv*/)
 {
+    constexpr uint32_t BLOCK_US =
+        static_cast<uint32_t>(Config::FRAMES_PER_BLOCK) * 1000000UL /
+        Config::SAMPLE_RATE;
+
+    uint32_t peak_us        = 0;
+    uint32_t sum_us         = 0;
+    uint32_t count          = 0;
+    uint32_t last_report_ms = millis();
+
     for (;;)
     {
+        const uint32_t t0 = micros();
         const size_t bytes = fill_audio_block(audio_buffer,
                                               Config::FRAMES_PER_BLOCK);
+        const uint32_t compute_us = micros() - t0;
+
+        if (compute_us > peak_us) peak_us = compute_us;
+        sum_us += compute_us;
+        ++count;
+
         i2s.write(reinterpret_cast<uint8_t *>(audio_buffer), bytes);
+
+        const uint32_t now_ms = millis();
+        if (now_ms - last_report_ms >= 1000)
+        {
+            const float avg_pct  = 100.0f * sum_us  / (count * BLOCK_US);
+            const float peak_pct = 100.0f * peak_us / BLOCK_US;
+            Serial.printf("[audio] load: avg %5.1f%%  peak %5.1f%%\r\n",
+                          avg_pct, peak_pct);
+            peak_us = 0;
+            sum_us  = 0;
+            count   = 0;
+            last_report_ms = now_ms;
+        }
     }
 }
 
