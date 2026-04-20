@@ -82,7 +82,7 @@ static UsbMidi usbMidi;
 /// @return       number of bytes written to the buffer
 static size_t fill_audio_block(int16_t *buf, uint16_t frames)
 {
-    constexpr uint8_t NUM_VOICES = 8;
+    constexpr uint8_t NUM_VOICES = 12;
     constexpr uint8_t NO_TRIG = 0xFF;
 
     for (uint16_t i = 0; i < frames; ++i)
@@ -182,7 +182,7 @@ static void audio_task(void * /*pv*/)
 
 /// MIDI task — polls the USB stack and forwards events into the queue.
 /// A 1 ms yield matches the USB full-speed frame rate, keeps Core 0
-/// available for TinyUSB's own internal work, and satisfies the task
+/// available for USB's own internal work, and satisfies the task
 /// watchdog.
 static void midi_task(void * /*pv*/)
 {
