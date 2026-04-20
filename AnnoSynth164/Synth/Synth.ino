@@ -20,6 +20,35 @@ namespace Config
 
     // Derived constants (computed at compile time)
     constexpr size_t SAMPLES_PER_BLOCK = FRAMES_PER_BLOCK * 2; // stereo
+
+    // ── Task configuration ──────────────────────────────────
+    //
+    // Two explicit FreeRTOS tasks, pinned to separate cores.
+    //
+    //   Core 1 (APP_CPU) — Audio task, high priority
+    //     On ESP32-S3 Core 1 is traditionally free of WiFi/BT/USB
+    //     system work, which makes it the cleanest place for hard
+    //     real-time DSP. Priority 10 sits above ordinary user work
+    //     (Arduino loopTask = 1) but well below kernel-critical
+    //     tasks (20+), so the scheduler can still service timers
+    //     and driver callbacks without being blocked by audio.
+    //
+    //   Core 0 (PRO_CPU) — MIDI task, moderate priority
+    //     Shares the core with TinyUSB's internal tasks and other
+    //     system work. A few ms of MIDI latency is imperceptible,
+    //     so priority 5 keeps the task responsive without ever
+    //     threatening the audio task should affinity slip.
+    //
+    // The strict priority gap (10 vs 5) guarantees that even if
+    // both tasks ended up on the same core for any reason, audio
+    // would always preempt MIDI, never the other way round.
+    constexpr UBaseType_t AUDIO_TASK_PRIORITY = 10;
+    constexpr uint32_t    AUDIO_TASK_STACK    = 8192;
+    constexpr BaseType_t  AUDIO_TASK_CORE     = 1;
+
+    constexpr UBaseType_t MIDI_TASK_PRIORITY  = 5;
+    constexpr uint32_t    MIDI_TASK_STACK     = 4096;
+    constexpr BaseType_t  MIDI_TASK_CORE      = 0;
 }
 
 // ── Types ──────────────────────────────────────────────────
@@ -32,6 +61,12 @@ struct MidiEvent
 
 // ── Global state ───────────────────────────────────────────
 
+// Shared SPSC queue.
+//   Producer: MIDI task (Core 0) via onMidiMessage callback.
+//   Consumer: Audio task (Core 1) via fill_audio_block.
+// Lives in internal SRAM — global/static storage on ESP32-S3
+// is not PSRAM-backed by default, which is exactly what we need
+// for the cross-core memory ordering guarantees.
 static AtomicQueue<MidiEvent, Config::QUEUE_LENGTH> midi_queue;
 
 static I2SClass i2s;
@@ -64,7 +99,7 @@ static size_t fill_audio_block(int16_t *buf, uint16_t frames)
         for (uint8_t v = 0; v < NUM_VOICES; ++v)
             mix += pdr_play(v, v == trig_voice, 0);
 
-        // Divide by 2 for headroom; clamp as a last-resort safety net
+        // Divide by 4 for headroom; clamp as a last-resort safety net
         mix = constrain(mix >> 2, INT16_MIN, INT16_MAX);
 
         // Duplicate mono mix to both stereo channels
@@ -96,7 +131,11 @@ void tsprint(const char *msg)
                   h % 100, m % 60, s % 60, ms % 1000, msg);
 }
 
-// ── MIDI callbacks ───────────────────────────────────
+// ── MIDI callbacks ─────────────────────────────────────────
+//
+// Invoked from the MIDI task context during usbMidi.update().
+// Because only that one task ever calls update(), the single-producer
+// invariant of AtomicQueue holds by construction.
 
 void onMidiMessage(const uint8_t (&data)[4])
 {
@@ -108,7 +147,10 @@ void onMidiMessage(const uint8_t (&data)[4])
     if (status == 0x90 && velocity > 0)
     {
         MidiEvent event = {channel, note, velocity};
-        midi_queue.push(event);
+        // Drop events if the audio loop hasn't drained the queue in time.
+        // At audible MIDI rates and 48 kHz polling this should not happen;
+        // if it does, raise Config::QUEUE_LENGTH.
+        (void)midi_queue.push(event);
     }
 }
 
@@ -120,6 +162,35 @@ void onDeviceConnect()
 void onDeviceDisconnected()
 {
     tsprint("MIDI Device Disconnected");
+}
+
+// ── Task bodies ────────────────────────────────────────────
+
+/// Audio task — drains the MIDI queue and feeds I2S.
+/// Pacing is provided implicitly by i2s.write(), which blocks until
+/// the DMA has room. That blocking yields back to the scheduler, so
+/// the task watchdog stays happy without a manual vTaskDelay.
+static void audio_task(void * /*pv*/)
+{
+    for (;;)
+    {
+        const size_t bytes = fill_audio_block(audio_buffer,
+                                              Config::FRAMES_PER_BLOCK);
+        i2s.write(reinterpret_cast<uint8_t *>(audio_buffer), bytes);
+    }
+}
+
+/// MIDI task — polls the USB stack and forwards events into the queue.
+/// A 1 ms yield matches the USB full-speed frame rate, keeps Core 0
+/// available for TinyUSB's own internal work, and satisfies the task
+/// watchdog.
+static void midi_task(void * /*pv*/)
+{
+    for (;;)
+    {
+        usbMidi.update();
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
 }
 
 // ── Arduino entry points ───────────────────────────────────
@@ -143,12 +214,39 @@ void setup()
     usbMidi.onDeviceConnected(onDeviceConnect);
     usbMidi.onDeviceDisconnected(onDeviceDisconnected);
     usbMidi.begin();
+
+    // Spawn the real-time tasks, each pinned to its designated core.
+    const BaseType_t audio_ok = xTaskCreatePinnedToCore(
+        audio_task, "audio",
+        Config::AUDIO_TASK_STACK, nullptr,
+        Config::AUDIO_TASK_PRIORITY, nullptr,
+        Config::AUDIO_TASK_CORE);
+
+    const BaseType_t midi_ok = xTaskCreatePinnedToCore(
+        midi_task, "midi",
+        Config::MIDI_TASK_STACK, nullptr,
+        Config::MIDI_TASK_PRIORITY, nullptr,
+        Config::MIDI_TASK_CORE);
+
+    if (audio_ok != pdPASS || midi_ok != pdPASS)
+    {
+        Serial.println("[ERROR] Failed to create real-time tasks.");
+        while (true)
+        {
+            delay(1000);
+        }
+    }
+
+    tsprint("Tasks started: audio@Core1(prio 10), midi@Core0(prio 5)");
+
+    // The Arduino loopTask (this context) has nothing left to do.
+    // Delete it so we don't consume a scheduling slot on Core 1 for
+    // an empty loop() — that slot belongs to the audio task now.
+    vTaskDelete(nullptr);
 }
 
 void loop()
 {
-    const size_t bytes = fill_audio_block(audio_buffer, Config::FRAMES_PER_BLOCK);
-    i2s.write(reinterpret_cast<uint8_t *>(audio_buffer), bytes);
-
-    usbMidi.update();
+    // Unused — setup() deletes its own (loop) task after spawning
+    // the real-time tasks, so loop() is never entered.
 }

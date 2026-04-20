@@ -133,16 +133,4 @@ public:
     {
         return Capacity - 1;
     }
-
-    /// Runtime check that the indices are genuinely lock-free on this
-    /// target. Call once in setup() if you want a hard guarantee:
-    ///     assert(midi_queue.is_lock_free());
-    /// On ESP32-S3 this returns true; on exotic targets without
-    /// hardware CAS it may return false, in which case push/pop still
-    /// work correctly but may take an internal lock and lose the
-    /// real-time properties this queue is designed for.
-    [[nodiscard]] bool is_lock_free() const noexcept
-    {
-        return head_.is_lock_free() && tail_.is_lock_free();
-    }
 };
