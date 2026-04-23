@@ -26,6 +26,9 @@ namespace Config
     // Derived constants (computed at compile time)
     constexpr size_t SAMPLES_PER_BLOCK = FRAMES_PER_BLOCK * 2; // stereo
 
+    // Voices parameters, used to trigger PDR
+    constexpr int8_t VOICES = 12;
+
     // ── Task configuration ──────────────────────────────────
     //
     // Three explicit FreeRTOS tasks, pinned to separate cores.
@@ -123,6 +126,25 @@ __attribute__((format(printf, 1, 2))) static void tsprint(const char *fmt, ...)
                   h % 100, m % 60, s % 60, ms % 1000, buf);
 }
 
+// Returns the next variant for a voice, different from its previous value
+uint8_t nextVoiceVariant(uint8_t voice, uint8_t N) {
+  static uint32_t rng_state = 0x9E3779B9;
+  static uint8_t last[Config::VOICES] = {0};
+
+  // xorshift32 inline
+  uint32_t x = rng_state;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  rng_state = x;
+
+  // Lemire reduction inline: r ∈ [1, N-1]
+  uint8_t r = (((uint64_t)x * (N - 1)) >> 32) + 1;
+
+  last[voice] = (r < last[voice]) ? r : r + 1;
+  return last[voice];
+}
+
 // Fills the audio buffer.
 //   buf    destination buffer (stereo, interleaved L/R)
 //   frames number of stereo frames to generate
@@ -133,8 +155,7 @@ __attribute__((format(printf, 1, 2))) static void tsprint(const char *fmt, ...)
 // than flash. Removes flash cache-miss latency from the hot loop —
 // relevant mainly after cold starts and on any cache eviction event.
 static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
-{
-    constexpr uint8_t NUM_VOICES = 12;
+{    
     constexpr uint8_t NO_TRIG = 0xFF;
 
     for (uint16_t i = 0; i < frames; ++i)
@@ -148,8 +169,8 @@ static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
 
         // Advance every voice and mix; only the triggered voice gets trig=1.
         int32_t mix = 0;
-        for (uint8_t v = 0; v < NUM_VOICES; ++v)
-            mix += pdr_play(v, (v == trig_voice) ? random(2) + 1 : 0, 0);
+        for (uint8_t voice = 0; voice < Config::VOICES; ++voice)
+            mix += pdr_play(voice, (voice == trig_voice) ? nextVoiceVariant(voice, 2) : 0, 0);
 
 
         // Divide by 4 for headroom; clamp as a last-resort safety net.
