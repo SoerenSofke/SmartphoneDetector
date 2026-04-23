@@ -46,17 +46,17 @@
  * ==========================================================================*/
 
 #define PDR_CONFIG                          \
-    PDR_VOICE(0, "audio/kick3.pdr");        \
-    PDR_VOICE(1, "audio/snare3.pdr");       \
-    PDR_VOICE(2, "audio/ride3.pdr");        \
-    PDR_VOICE(3, "audio/hihatClosed3.pdr"); \
-    PDR_VOICE(4);                           \
-    PDR_VOICE(5);                           \
-    PDR_VOICE(6);                           \
-    PDR_VOICE(7);                           \
-    PDR_VOICE(8);                           \
-    PDR_VOICE(9);                           \
-    PDR_VOICE(10);                          \
+    PDR_VOICE(0, "audio/kick3.pdr", "audio/kick3.pdr");         \
+    PDR_VOICE(1, "audio/snare3.pdr", "audio/kick3.pdr");        \
+    PDR_VOICE(2, "audio/ride3.pdr", "audio/kick3.pdr");         \
+    PDR_VOICE(3, "audio/hihatClosed3.pdr", "audio/kick3.pdr");  \
+    PDR_VOICE(4);                                               \
+    PDR_VOICE(5);                                               \
+    PDR_VOICE(6);                                               \
+    PDR_VOICE(7);                                               \
+    PDR_VOICE(8);                                               \
+    PDR_VOICE(9);                                               \
+    PDR_VOICE(10);                                              \
     PDR_VOICE(11)
 
 /* ==========================================================================
