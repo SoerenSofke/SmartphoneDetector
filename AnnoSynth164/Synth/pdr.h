@@ -45,19 +45,35 @@
  * USER CONFIGURATION — only section users need to edit
  * ==========================================================================*/
 
-#define PDR_CONFIG                          \
-    PDR_VOICE(0, "audio/kick3.pdr", "audio/kick3.pdr");         \
-    PDR_VOICE(1, "audio/snare3.pdr", "audio/kick3.pdr");        \
-    PDR_VOICE(2, "audio/ride3.pdr", "audio/kick3.pdr");         \
-    PDR_VOICE(3, "audio/hihatClosed3.pdr", "audio/kick3.pdr");  \
-    PDR_VOICE(4);                                               \
-    PDR_VOICE(5);                                               \
-    PDR_VOICE(6);                                               \
-    PDR_VOICE(7);                                               \
-    PDR_VOICE(8);                                               \
-    PDR_VOICE(9);                                               \
-    PDR_VOICE(10);                                              \
-    PDR_VOICE(11)
+ #define PDR_CONFIG \
+    PDR_VOICE(0,  "slmdr/BD_44_1.pdr"); \
+    PDR_VOICE(1,  "slmdr/SD_44_1.pdr"); \
+    PDR_VOICE(2,  "slmdr/RD_44_1.pdr"); \
+    PDR_VOICE(3,  "slmdr/HC_44_1.pdr"); \
+    PDR_VOICE(4,  "slmdr/CB_44_1.pdr"); \
+    PDR_VOICE(5,  "slmdr/CR_44_1.pdr"); \
+    PDR_VOICE(6,  "slmdr/HO_44_1.pdr"); \
+    PDR_VOICE(7,  "slmdr/RB_44_1.pdr"); \
+    PDR_VOICE(8,  "slmdr/ST_44_1.pdr"); \
+    PDR_VOICE(9,  "slmdr/TH_44_1.pdr"); \
+    PDR_VOICE(10, "slmdr/TH_44_1.pdr"); \
+    PDR_VOICE(11, "slmdr/TL_44_1.pdr")
+
+/*
+#define PDR_CONFIG \
+    PDR_VOICE(0,  "slmdr/BD_44_1.pdr", "slmdr/BD_44_2.pdr", "slmdr/BD_44_3.pdr", "slmdr/BD_44_4.pdr", "slmdr/BD_44_5.pdr"); \
+    PDR_VOICE(1,  "slmdr/SD_44_1.pdr", "slmdr/SD_44_2.pdr", "slmdr/SD_44_3.pdr", "slmdr/SD_44_4.pdr", "slmdr/SD_44_5.pdr"); \
+    PDR_VOICE(2,  "slmdr/RD_44_1.pdr", "slmdr/RD_44_2.pdr", "slmdr/RD_44_3.pdr", "slmdr/RD_44_4.pdr", "slmdr/RD_44_5.pdr"); \
+    PDR_VOICE(3,  "slmdr/HC_44_1.pdr", "slmdr/HC_44_2.pdr", "slmdr/HC_44_3.pdr", "slmdr/HC_44_4.pdr", "slmdr/HC_44_5.pdr"); \
+    PDR_VOICE(4,  "slmdr/CB_44_1.pdr", "slmdr/CB_44_2.pdr", "slmdr/CB_44_3.pdr", "slmdr/CB_44_4.pdr", "slmdr/CB_44_5.pdr"); \
+    PDR_VOICE(5,  "slmdr/CR_44_1.pdr", "slmdr/CR_44_2.pdr", "slmdr/CR_44_3.pdr", "slmdr/CR_44_4.pdr", "slmdr/CR_44_5.pdr"); \
+    PDR_VOICE(6,  "slmdr/HO_44_1.pdr", "slmdr/HO_44_2.pdr", "slmdr/HO_44_3.pdr", "slmdr/HO_44_4.pdr", "slmdr/HO_44_5.pdr"); \
+    PDR_VOICE(7,  "slmdr/RB_44_1.pdr", "slmdr/RB_44_2.pdr", "slmdr/RB_44_3.pdr", "slmdr/RB_44_4.pdr", "slmdr/RB_44_5.pdr"); \
+    PDR_VOICE(8,  "slmdr/ST_44_1.pdr", "slmdr/ST_44_1.pdr", "slmdr/ST_44_1.pdr", "slmdr/ST_44_1.pdr", "slmdr/ST_44_1.pdr"); \
+    PDR_VOICE(9,  "slmdr/TH_44_1.pdr", "slmdr/TH_44_2.pdr", "slmdr/TH_44_3.pdr", "slmdr/TH_44_4.pdr", "slmdr/TH_44_5.pdr"); \
+    PDR_VOICE(10, "slmdr/TH_44_1.pdr", "slmdr/TH_44_2.pdr", "slmdr/TH_44_3.pdr", "slmdr/TH_44_4.pdr", "slmdr/TH_44_5.pdr"); \
+    PDR_VOICE(11, "slmdr/TL_44_1.pdr", "slmdr/TL_44_2.pdr", "slmdr/TL_44_3.pdr", "slmdr/TL_44_4.pdr", "slmdr/TL_44_5.pdr")
+*/
 
 /* ==========================================================================
  * Decoder — no user-editable code below

@@ -20,8 +20,8 @@ namespace Config
     constexpr size_t QUEUE_LENGTH = 16;
 
     // Audio parameters
-    constexpr uint32_t SAMPLE_RATE = 48000;
-    constexpr uint16_t FRAMES_PER_BLOCK = 128;    
+    constexpr uint32_t SAMPLE_RATE = 44100;
+    constexpr uint16_t FRAMES_PER_BLOCK = 128;
 
     // Derived constants (computed at compile time)
     constexpr size_t SAMPLES_PER_BLOCK = FRAMES_PER_BLOCK * 2; // stereo
@@ -126,23 +126,50 @@ __attribute__((format(printf, 1, 2))) static void tsprint(const char *fmt, ...)
                   h % 100, m % 60, s % 60, ms % 1000, buf);
 }
 
-// Returns the next variant for a voice, different from its previous value
-uint8_t nextVoiceVariant(uint8_t voice, uint8_t N) {
-  static uint32_t rng_state = 0x9E3779B9;
-  static uint8_t last[Config::VOICES] = {0};
+uint8_t nextVoiceVariant(uint8_t voice, uint8_t N)
+{
+    static uint32_t rng_state = 0x9E3779B9;
+    // Initialize "last" to an out-of-range sentinel (0) so the first call
+    // for each voice can return any variant in [1, N] without bias.
+    static uint8_t last[Config::VOICES] = {0};
 
-  // xorshift32 inline
-  uint32_t x = rng_state;
-  x ^= x << 13;
-  x ^= x >> 17;
-  x ^= x << 5;
-  rng_state = x;
+    // Trivial cases:
+    //   N == 0 -> no variants, return 0 as "skip" indicator
+    //   N == 1 -> only one variant, always return 1
+    // Storing N into last[voice] preserves the sentinel semantics:
+    //   - N=0 keeps last[voice]=0 (still "first call" for next time)
+    //   - N=1 sets last[voice]=1 (valid value)
+    if (N <= 1)
+    {
+        last[voice] = N;
+        return N;
+    }
 
-  // Lemire reduction inline: r ∈ [1, N-1]
-  uint8_t r = (((uint64_t)x * (N - 1)) >> 32) + 1;
+    // xorshift32
+    uint32_t x = rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    rng_state = x;
 
-  last[voice] = (r < last[voice]) ? r : r + 1;
-  return last[voice];
+    // Pick the next variant.
+    //   - First call for this voice (sentinel 0): uniform over [1, N].
+    //   - Subsequent calls: uniform over [1, N] \ {last[voice]} via
+    //     Lemire reduction on (N-1) plus the standard "skip last" trick.
+    // r and r+1 are provably <= N <= 255, so uint8_t arithmetic is safe.
+    uint8_t result;
+    if (last[voice] == 0)
+    {
+        result = (((uint64_t)x * N) >> 32) + 1; // [1, N]
+    }
+    else
+    {
+        uint8_t r = (((uint64_t)x * (N - 1)) >> 32) + 1; // [1, N-1]
+        result = (r < last[voice]) ? r : r + 1;          // [1, N] \ {last}
+    }
+
+    last[voice] = result;
+    return result;
 }
 
 // Fills the audio buffer.
@@ -155,8 +182,9 @@ uint8_t nextVoiceVariant(uint8_t voice, uint8_t N) {
 // than flash. Removes flash cache-miss latency from the hot loop —
 // relevant mainly after cold starts and on any cache eviction event.
 static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
-{    
+{
     constexpr uint8_t NO_TRIG = 0xFF;
+    constexpr uint8_t TOGGLE = 0;
 
     for (uint16_t i = 0; i < frames; ++i)
     {
@@ -170,8 +198,7 @@ static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
         // Advance every voice and mix; only the triggered voice gets trig=1.
         int32_t mix = 0;
         for (uint8_t voice = 0; voice < Config::VOICES; ++voice)
-            mix += pdr_play(voice, (voice == trig_voice) ? nextVoiceVariant(voice, 2) : 0, 0);
-
+            mix += pdr_play(voice, (voice == trig_voice) ? nextVoiceVariant(voice, 1) : 0, TOGGLE);
 
         // Divide by 4 for headroom; clamp as a last-resort safety net.
         mix = constrain(mix >> 2, INT16_MIN, INT16_MAX);
