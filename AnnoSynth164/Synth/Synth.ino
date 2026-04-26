@@ -11,6 +11,25 @@
 // ── Configuration ──────────────────────────────────────────
 namespace Config
 {
+    // 16 contiguous MIDI notes mapped to voice indices.
+    constexpr uint8_t NOTE_TO_VOICE[16] = {
+        6,
+        5,
+        4,
+        1,
+        6,
+        5,
+        4,
+        1,
+        9,
+        2,
+        3,
+        0,
+        8,
+        7,
+        10,
+        11};
+
     // I2S pin assignment (adjust to your board)
     constexpr int8_t PIN_BCLK = 5;
     constexpr int8_t PIN_WSEL = 6;
@@ -192,7 +211,7 @@ static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
         MidiEvent event;
         const uint8_t trig_voice =
             midi_queue.pop(event)
-                ? static_cast<uint8_t>(event.note - 24)
+                ? static_cast<uint8_t>(Config::NOTE_TO_VOICE[event.note - 24])
                 : NO_TRIG;
 
         // Advance every voice and mix; only the triggered voice gets trig=1.

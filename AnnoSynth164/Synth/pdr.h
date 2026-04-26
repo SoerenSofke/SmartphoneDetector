@@ -51,7 +51,7 @@
     PDR_VOICE(2,  "slmdr/HC_44_1.pdr"); \
     PDR_VOICE(3,  "slmdr/HO_44_1.pdr"); \
     PDR_VOICE(4,  "slmdr/TL_44_1.pdr"); \
-    PDR_VOICE(5,  "slmdr/TH_44_1.pdr"); \
+    PDR_VOICE(5,  "slmdr/TM_44_1.pdr"); \
     PDR_VOICE(6,  "slmdr/TH_44_1.pdr"); \
     PDR_VOICE(7,  "slmdr/RD_44_1.pdr"); \
     PDR_VOICE(8,  "slmdr/RB_44_1.pdr"); \
