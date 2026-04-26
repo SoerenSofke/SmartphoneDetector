@@ -217,7 +217,7 @@ static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
         // Advance every voice and mix; only the triggered voice gets trig=1.
         int32_t mix = 0;
         for (uint8_t voice = 0; voice < Config::VOICES; ++voice)
-            mix += pdr_play(voice, (voice == trig_voice) ? nextVoiceVariant(voice, 1) : 0, TOGGLE);
+            mix += pdr_play(voice, (voice == trig_voice) ? nextVoiceVariant(voice, 5) : 0, TOGGLE);
 
         // Divide by 4 for headroom; clamp as a last-resort safety net.
         mix = constrain(mix >> 2, INT16_MIN, INT16_MAX);
