@@ -31,9 +31,9 @@ namespace Config
         11};
 
     // I2S pin assignment (adjust to your board)
-    constexpr int8_t PIN_BCLK = 5;
-    constexpr int8_t PIN_WSEL = 6;
-    constexpr int8_t PIN_DOUT = 7;
+    constexpr int8_t PIN_BCLK = 5;    
+    constexpr int8_t PIN_DOUT = 6;
+    constexpr int8_t PIN_WSEL = 7;
 
     // MIDI queue parameters
     constexpr size_t QUEUE_LENGTH = 16;
@@ -349,7 +349,7 @@ static void stats_task(void * /*pv*/)
 // ── Arduino entry points ───────────────────────────────────
 
 void setup()
-{
+{    
     Serial.begin(115200);
     delay(2000);
 
