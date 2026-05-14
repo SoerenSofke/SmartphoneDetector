@@ -7,6 +7,7 @@
 #include "UsbMidi.h"
 #include "AtomicQueue.h"
 #include "pdr.h"
+#include "PersistentArray.h"
 
 // ── Configuration ──────────────────────────────────────────
 namespace Config
@@ -31,7 +32,7 @@ namespace Config
         11};
 
     // I2S pin assignment (adjust to your board)
-    constexpr int8_t PIN_BCLK = 5;    
+    constexpr int8_t PIN_BCLK = 5;
     constexpr int8_t PIN_DOUT = 6;
     constexpr int8_t PIN_WSEL = 7;
 
@@ -111,6 +112,9 @@ static I2SClass i2s;
 static int16_t audio_buffer[Config::SAMPLES_PER_BLOCK];
 
 static UsbMidi usbMidi;
+
+// 12 uint8_t slots, NVS namespace "velocities", default value 127, commit window 2 seconds
+PersistentArray<uint8_t, 12> velocities("velocities", 127, 2000);
 
 // Audio-task peak CPU load, published to the stats task on Core 0.
 // Writer: audio_task (single producer). Reader: stats_task (exchange(0)
@@ -205,22 +209,37 @@ static IRAM_ATTR size_t fill_audio_block(int16_t *buf, uint16_t frames)
     constexpr uint8_t NO_TRIG = 0xFF;
     constexpr uint8_t TOGGLE = 0;
 
+    // Cache velocities for the block in local memory to avoid repeated
+    int16_t velocities_cached[Config::VOICES];
+    for (uint8_t voice = 0; voice < Config::VOICES; ++voice)
+    {
+        velocities_cached[voice] = velocities.get(voice);
+    }
+
+    static uint8_t trig_velocity[Config::VOICES] = {0};
+
     for (uint16_t i = 0; i < frames; ++i)
     {
-        // Poll MIDI queue once per sample; map note to voice (note 24 = voice 0).
         MidiEvent event;
-        const uint8_t trig_voice =
-            midi_queue.pop(event)
-                ? static_cast<uint8_t>(Config::NOTE_TO_VOICE[event.note - 24])
-                : NO_TRIG;
+        const bool triggered = midi_queue.pop(event);
+
+        uint8_t trig_voice = NO_TRIG;
+        if (triggered)
+        {
+            trig_voice = static_cast<uint8_t>(Config::NOTE_TO_VOICE[event.note - 24]);
+            trig_velocity[trig_voice] = constrain(((event.velocity + (event.velocity << 1)) >> 2) + 32, 32, 127);
+        }
 
         // Advance every voice and mix; only the triggered voice gets trig=1.
         int32_t mix = 0;
         for (uint8_t voice = 0; voice < Config::VOICES; ++voice)
-            mix += pdr_play(voice, (voice == trig_voice) ? nextVoiceVariant(voice, 5) : 0, TOGGLE);
-
-        // Divide by 4 for headroom; clamp as a last-resort safety net.
-        mix = constrain(mix >> 2, INT16_MIN, INT16_MAX);
+        {
+            int16_t voice_sample = pdr_play(voice, (voice == trig_voice) ? nextVoiceVariant(voice, 5) : 0, TOGGLE);
+            mix += static_cast<int32_t>(voice_sample) * trig_velocity[voice];
+        }
+        // Shift back the 0–127 velocity scaling (>>7) plus 1 bits headroom for
+        // the 12-voice sum; clamp as a last-resort safety net.
+        mix = constrain(mix >> (1 + 7), INT16_MIN, INT16_MAX);
 
         // Duplicate mono mix to both stereo channels.
         buf[2 * i] = buf[2 * i + 1] = static_cast<int16_t>(mix);
@@ -318,6 +337,7 @@ static void midi_task(void * /*pv*/)
     for (;;)
     {
         usbMidi.update();
+        velocities.update();
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
@@ -349,7 +369,7 @@ static void stats_task(void * /*pv*/)
 // ── Arduino entry points ───────────────────────────────────
 
 void setup()
-{    
+{
     Serial.begin(115200);
     delay(2000);
 
@@ -367,6 +387,8 @@ void setup()
     usbMidi.onDeviceConnected(onDeviceConnect);
     usbMidi.onDeviceDisconnected(onDeviceDisconnected);
     usbMidi.begin();
+
+    velocities.begin();
 
     // Spawn the real-time tasks, each pinned to its designated core.
     const BaseType_t audio_ok = xTaskCreatePinnedToCore(
