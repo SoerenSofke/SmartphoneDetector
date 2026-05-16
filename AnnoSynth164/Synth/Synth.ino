@@ -8,6 +8,7 @@
 #include "AtomicQueue.h"
 #include "pdr.h"
 #include "PersistentArray.h"
+#include "soc/gpio_reg.h"
 
 // ── Configuration ──────────────────────────────────────────
 namespace Config
@@ -30,6 +31,9 @@ namespace Config
         7,
         10,
         11};
+
+    // Mute switch pin (adjust to your board)
+    constexpr int8_t MUTE_PIN = 9;
 
     // I2S pin assignment (adjust to your board)
     constexpr int8_t PIN_BCLK = 5;
@@ -259,6 +263,16 @@ static bool init_i2s()
                      I2S_SLOT_MODE_STEREO);
 }
 
+// Hardware mute on the UDA1334A (MUTE pin, JP1 #3): true = muted.
+// Direct W1TS/W1TC write — single atomic store, no effect on other
+// pins, Requires pinMode(Config::MUTE_PIN, OUTPUT) once; 
+// valid for GPIO < 32.
+inline __attribute__((always_inline))
+void setMute(bool on) {
+  if (on) REG_WRITE(GPIO_OUT_W1TS_REG, 1U << Config::MUTE_PIN);  // Mute an
+  else    REG_WRITE(GPIO_OUT_W1TC_REG, 1U << Config::MUTE_PIN);  // Mute aus
+}
+
 // ── MIDI callbacks ─────────────────────────────────────────
 //
 // Invoked from the MIDI task context during usbMidi.update().
@@ -267,6 +281,8 @@ static bool init_i2s()
 
 void onMidiMessage(const uint8_t (&data)[4])
 {
+    setMute(false);
+    
     const uint8_t status = data[1] & 0xF0;
     const uint8_t channel = data[1] & 0x0F;
     const uint8_t note = data[2];
@@ -284,11 +300,13 @@ void onMidiMessage(const uint8_t (&data)[4])
 
 void onDeviceConnect()
 {
+    setMute(true);
     tsprint("[info] MIDI device connected");
 }
 
 void onDeviceDisconnected()
 {
+    setMute(true);
     tsprint("[info] MIDI device disconnected");
 }
 
@@ -370,6 +388,9 @@ static void stats_task(void * /*pv*/)
 
 void setup()
 {
+    pinMode(Config::MUTE_PIN, OUTPUT);    
+    setMute(true);
+
     Serial.begin(115200);
     delay(2000);
 
