@@ -32,13 +32,18 @@ namespace Config
         10,
         11};
 
+    // RGB LED pin assignment (adjust to your board)
+    constexpr uint8_t RGB_PIN = 48;
+    constexpr uint8_t RGB_LEVEL = 16;
+    constexpr uint8_t CPU_PEAK = 80;
+
     // Mute switch pin (adjust to your board)
-    constexpr int8_t MUTE_PIN = 9;
+    constexpr uint8_t MUTE_PIN = 9;
 
     // I2S pin assignment (adjust to your board)
-    constexpr int8_t PIN_BCLK = 5;
-    constexpr int8_t PIN_DOUT = 6;
-    constexpr int8_t PIN_WSEL = 7;
+    constexpr uint8_t PIN_BCLK = 5;
+    constexpr uint8_t PIN_DOUT = 6;
+    constexpr uint8_t PIN_WSEL = 7;
 
     // MIDI queue parameters
     constexpr size_t QUEUE_LENGTH = 16;
@@ -51,7 +56,7 @@ namespace Config
     constexpr size_t SAMPLES_PER_BLOCK = FRAMES_PER_BLOCK * 2; // stereo
 
     // Voices parameters, used to trigger PDR
-    constexpr int8_t VOICES = 12;
+    constexpr uint8_t VOICES = 12;
 
     // ── Task configuration ──────────────────────────────────
     //
@@ -95,6 +100,14 @@ namespace Config
 
 // ── Types ──────────────────────────────────────────────────
 
+enum class Led : uint8_t
+{
+    Off,
+    Red,
+    Green,
+    Blue
+};
+
 struct MidiEvent
 {
     uint8_t channel;
@@ -133,6 +146,28 @@ namespace stats
 }
 
 // ── Helper functions ───────────────────────────────────────
+
+// Onboard WS2812 as a status indicator. RMT-backed (rgbLedWrite),
+// interrupt-friendly. Do not call from the audio_task.
+inline void setLed(Led color)
+{
+    constexpr uint8_t L = Config::RGB_LEVEL;
+    switch (color)
+    {
+    case Led::Red:
+        rgbLedWrite(Config::RGB_PIN, L, 0, 0);
+        break;
+    case Led::Green:
+        rgbLedWrite(Config::RGB_PIN, 0, L, 0);
+        break;
+    case Led::Blue:
+        rgbLedWrite(Config::RGB_PIN, 0, 0, L);
+        break;
+    case Led::Off:
+        rgbLedWrite(Config::RGB_PIN, 0, 0, 0);
+        break;
+    }
+}
 
 // Serial output with a [HH:MM:SS.mmm] timestamp prefix, printf-style.
 // All Serial output in this sketch goes through here so the log is
@@ -265,12 +300,14 @@ static bool init_i2s()
 
 // Hardware mute on the UDA1334A (MUTE pin, JP1 #3): true = muted.
 // Direct W1TS/W1TC write — single atomic store, no effect on other
-// pins, Requires pinMode(Config::MUTE_PIN, OUTPUT) once; 
+// pins, Requires pinMode(Config::MUTE_PIN, OUTPUT) once;
 // valid for GPIO < 32.
-inline __attribute__((always_inline))
-void setMute(bool on) {
-  if (on) REG_WRITE(GPIO_OUT_W1TS_REG, 1U << Config::MUTE_PIN);  // Mute an
-  else    REG_WRITE(GPIO_OUT_W1TC_REG, 1U << Config::MUTE_PIN);  // Mute aus
+inline __attribute__((always_inline)) void setMute(bool on)
+{
+    if (on)
+        REG_WRITE(GPIO_OUT_W1TS_REG, 1U << Config::MUTE_PIN); // Mute an
+    else
+        REG_WRITE(GPIO_OUT_W1TC_REG, 1U << Config::MUTE_PIN); // Mute aus
 }
 
 // ── MIDI callbacks ─────────────────────────────────────────
@@ -282,7 +319,7 @@ void setMute(bool on) {
 void onMidiMessage(const uint8_t (&data)[4])
 {
     setMute(false);
-    
+
     const uint8_t status = data[1] & 0xF0;
     const uint8_t channel = data[1] & 0x0F;
     const uint8_t note = data[2];
@@ -301,12 +338,14 @@ void onMidiMessage(const uint8_t (&data)[4])
 void onDeviceConnect()
 {
     setMute(true);
+    setLed(Led::Green);
     tsprint("[info] MIDI device connected");
 }
 
 void onDeviceDisconnected()
 {
     setMute(true);
+    setLed(Led::Blue);
     tsprint("[info] MIDI device disconnected");
 }
 
@@ -380,7 +419,13 @@ static void stats_task(void * /*pv*/)
             continue; // audio task hasn't produced any blocks yet
 
         const float peak_pct = 100.0f * peak / BLOCK_US;
-        tsprint("[audio] load: peak %5.1f%%", peak_pct);
+        tsprint("[audio] load: peak %5.1f%%", peak_pct);       
+
+        // Latch red on the first overload breach until MIDI oder power disconnect
+        if (peak_pct > Config::CPU_PEAK)
+        {
+            setLed(Led::Red);            
+        }
     }
 }
 
@@ -388,8 +433,10 @@ static void stats_task(void * /*pv*/)
 
 void setup()
 {
-    pinMode(Config::MUTE_PIN, OUTPUT);    
+    pinMode(Config::MUTE_PIN, OUTPUT);
     setMute(true);
+
+    setLed(Led::Blue);
 
     Serial.begin(115200);
     delay(2000);
